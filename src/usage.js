@@ -110,9 +110,61 @@
     return `${Math.floor(s / 60)}m ago`;
   }
 
+  /** The window shown in the main "session" cell. */
+  function pickSession(windows) {
+    return windows.find((w) => w.key === 'five_hour') || primaryWindow(windows);
+  }
+
+  /** The window shown in the "weekly" cell (null if absent or already used as the session). */
+  function pickWeekly(windows, session) {
+    return windows.find((w) => w.key === 'seven_day' && w !== session) || null;
+  }
+
+  /** Lower-case cell label: "session", "weekly", or the window's own label. */
+  function shortLabel(win) {
+    if (win.key === 'five_hour') return 'session';
+    if (win.key === 'seven_day') return 'weekly';
+    return win.label.toLowerCase();
+  }
+
+  const SAME_WINDOW_TOLERANCE_MS = 5 * 60 * 1000;
+  const MAX_OBSERVATION_GAP_MS = 3 * 60 * 1000;
+
+  /**
+   * How many whole percentage points of usage were just consumed?
+   *
+   * prev/next are `{pct, resetsAt}` snapshots of the session window taken at
+   * two consecutive successful fetches (or null). Returns 0 when there was no
+   * increase, when the two snapshots are too far apart to attribute to "a
+   * prompt just finished" (sleeping laptop, background tab), or when the
+   * window rolled over without new usage.
+   *
+   * Compares *displayed* (rounded) values, so what the user sees going
+   * 10% -> 15% is reported as +5.
+   */
+  function sessionDelta(prev, next, gapMs, maxGapMs = MAX_OBSERVATION_GAP_MS) {
+    if (!prev || !next) return 0;
+    if (!(gapMs >= 0) || gapMs > maxGapMs) return 0;
+
+    let sameWindow;
+    if (prev.resetsAt && next.resetsAt) {
+      sameWindow = Math.abs(next.resetsAt - prev.resetsAt) < SAME_WINDOW_TOLERANCE_MS;
+    } else {
+      sameWindow = !prev.resetsAt && !next.resetsAt;
+    }
+
+    const base = sameWindow ? Math.round(prev.pct) : 0; // a fresh window starts from 0
+    const delta = Math.round(next.pct) - base;
+    return delta > 0 ? delta : 0;
+  }
+
   const api = {
     parseUsage,
     primaryWindow,
+    pickSession,
+    pickWeekly,
+    shortLabel,
+    sessionDelta,
     severity,
     formatCountdown,
     formatAgo,

@@ -80,6 +80,64 @@ test('formatCountdown', () => {
   assert.equal(U.formatCountdown(4 * day + 3 * hr + 59 * min), '4d 3h');
 });
 
+test('pickSession / pickWeekly / shortLabel', () => {
+  const { windows } = U.parseUsage(SAMPLE);
+  const session = U.pickSession(windows);
+  assert.equal(session.key, 'five_hour');
+  assert.equal(U.pickWeekly(windows, session).key, 'seven_day');
+  assert.equal(U.shortLabel(session), 'session');
+  assert.equal(U.shortLabel(U.pickWeekly(windows, session)), 'weekly');
+
+  // If only the weekly window exists it becomes the main cell and there is no second cell.
+  const onlyWeekly = windows.filter((w) => w.key === 'seven_day');
+  const s2 = U.pickSession(onlyWeekly);
+  assert.equal(s2.key, 'seven_day');
+  assert.equal(U.pickWeekly(onlyWeekly, s2), null);
+  assert.equal(U.pickSession([]), null);
+});
+
+const T0 = Date.parse('2026-11-17T12:00:00Z');
+const snap = (pct, resetsInMin) => ({ pct, resetsAt: resetsInMin == null ? null : new Date(T0 + resetsInMin * 60000) });
+
+test('sessionDelta: 10% -> 15% is +5', () => {
+  assert.equal(U.sessionDelta(snap(10, 120), snap(15, 120), 20000), 5);
+});
+
+test('sessionDelta: compares displayed (rounded) values', () => {
+  assert.equal(U.sessionDelta(snap(10.4, 120), snap(14.6, 120), 20000), 5); // 10 -> 15
+  assert.equal(U.sessionDelta(snap(10.2, 120), snap(10.4, 120), 20000), 0); // 10 -> 10
+});
+
+test('sessionDelta: no change, decrease, or missing data -> 0', () => {
+  assert.equal(U.sessionDelta(snap(15, 120), snap(15, 120), 20000), 0);
+  assert.equal(U.sessionDelta(snap(15, 120), snap(12, 120), 20000), 0);
+  assert.equal(U.sessionDelta(null, snap(15, 120), 20000), 0);
+  assert.equal(U.sessionDelta(snap(15, 120), null, 20000), 0);
+});
+
+test('sessionDelta: window rolled over -> counts from zero', () => {
+  // 90% used, window resets, user sends a prompt: new window shows 3%.
+  assert.equal(U.sessionDelta(snap(90, 5), snap(3, 300), 20000), 3);
+  // Window rolled over with nothing used yet.
+  assert.equal(U.sessionDelta(snap(90, 5), snap(0, null), 20000), 0);
+});
+
+test('sessionDelta: first prompt of an idle window counts from zero', () => {
+  assert.equal(U.sessionDelta(snap(0, null), snap(4, 300), 20000), 4);
+});
+
+test('sessionDelta: tiny resets_at jitter is still the same window', () => {
+  const a = { pct: 10, resetsAt: new Date(T0 + 120 * 60000) };
+  const b = { pct: 16, resetsAt: new Date(T0 + 120 * 60000 + 2000) };
+  assert.equal(U.sessionDelta(a, b, 20000), 6);
+});
+
+test('sessionDelta: ignores long gaps (sleeping laptop / background tab)', () => {
+  assert.equal(U.sessionDelta(snap(10, 120), snap(40, 120), 10 * 60 * 1000), 0);
+  assert.equal(U.sessionDelta(snap(10, 120), snap(40, 120), -5), 0);
+  assert.equal(U.sessionDelta(snap(10, 120), snap(40, 120), NaN), 0);
+});
+
 test('formatAgo', () => {
   assert.equal(U.formatAgo(1000), 'just now');
   assert.equal(U.formatAgo(42 * 1000), '42s ago');
