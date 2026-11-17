@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Usage Overlay",
+  "version": "0.1.0",
+  "description": "A small, draggable overlay on claude.ai that shows your session and weekly usage limits with reset countdowns.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["src/usage.js", "src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_title": "Show or hide the Claude usage overlay",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  }
+}

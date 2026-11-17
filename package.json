@@ -1,0 +1,9 @@
+{
+  "name": "claude-usage-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension: a small overlay on claude.ai showing your session and weekly usage limits.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
