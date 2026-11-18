@@ -9,11 +9,11 @@ A small Chrome extension that docks a flat usage strip to the top of [claude.ai]
    gradient progress line
 ```
 
-- **Session cell:** label, time until the 5-hour window resets, and the percentage used. A gradient line along the bottom edge fills as usage grows.
+- **Session cell:** label, time until the 5-hour window resets, and the percentage used. The gradient progress fill sits on the page's own header separator line, with exactly the same thickness, so it reads as part of that line.
 - **Weekly cell:** the weekly percentage. Every 30 seconds it flips to the time left (`3d 4h`), holds for about 6 seconds, and flips back.
 - **Fire animation:** when you finish a prompt and session usage jumps (say 10% to 15%), the session cell lights up with flames and shows `+5%` for 5 seconds, then settles back to normal.
 - **Details:** click the strip to drop down every limit (per-model weekly caps, extra usage) with reset times.
-- **Drag** the strip left or right and it remembers its position. Click the toolbar icon to hide or show it.
+- Click the toolbar icon to hide or show the strip.
 - No account, no API key, no analytics, no remote servers.
 
 Works in Chrome and Edge (and other Chromium browsers).
@@ -46,9 +46,14 @@ It uses your existing session cookies, and the request goes to claude.ai itself.
 - A jump is only shown when the two checks were less than 3 minutes apart, so reopening a laptop or a background tab doesn't set off the fire for old usage.
 - A window rolling over (new 5-hour session) counts from 0.
 
-The only permission is `storage`, used to remember the strip's position and the hidden/shown state. It reads no chats, and nothing leaves your browser.
+The only permission is `storage`, used to remember the hidden/shown state. It reads no chats, and nothing leaves your browser.
 
 Windows are discovered generically (any object with a numeric `utilization`), so new limits that Anthropic adds appear in the dropdown without a code change.
+
+**Alignment with claude.ai.** The strip fits itself to the page it's on:
+
+- *Bottom edge:* it finds the header's separator line at runtime (the header's bottom border), ends the strip just above it, and draws the progress fill in that same row with the same thickness. If it can't find a separator it falls back to a 45px strip with its own 1px bottom edge.
+- *Horizontal position:* it centres on the message composer's vertical axis, which is the middle of the chat column (between the chat title on the left and the header buttons on the right). It follows the composer as the sidebar or a side panel opens and closes, and falls back to `<main>`, then the viewport centre, on pages with no composer.
 
 ### Caveats
 

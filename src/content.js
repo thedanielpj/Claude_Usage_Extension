@@ -37,7 +37,6 @@
     globalThis.__CUO_CONFIG__ || {}
   );
 
-  const KEY_X = 'cuo_x';
   const KEY_HIDDEN = 'cuo_hidden';
   const EDGE = 8;
   const PANEL_W = 300;
@@ -149,7 +148,6 @@
     fetching: false,
     open: false,
     hidden: false,
-    offsetX: 0, // horizontal drag offset from centre, px
     weeklyFace: 'pct', // pct | time
     flipping: false,
     burn: null, // { delta, timer }
@@ -243,9 +241,11 @@
 .root {
   --bg: #191919; --line: #353535; --muted: #9e9e9e; --fg: #efefef;
   --fire-a: #ff5500; --fire-b: #f28d00;
-  position: fixed; top: 0; left: 50%; z-index: 2147483000;
-  transform: translateX(-50%);
-  display: flex; align-items: stretch;
+  --h: 45px; /* header height incl. its separator; measured from the page at runtime */
+  --bw: 1px; /* separator thickness; the progress line is exactly this thick */
+  position: fixed; top: 0; left: 0; z-index: 2147483000;
+  height: var(--h);
+  display: flex; align-items: flex-start;
   font: 400 14px/17px "Cuo Inter", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
@@ -256,18 +256,20 @@
 
 /* ---------- cells ---------- */
 .cell {
-  position: relative; isolation: isolate; overflow: hidden;
-  height: 44px; margin: 0; padding: 0 16px;
+  position: relative; isolation: isolate;
+  height: calc(var(--h) - var(--bw)); margin: 0; padding: 0 16px;
   background: var(--bg); color: inherit; font: inherit;
-  border: 0 solid var(--line); border-width: 0 1px 1px 1px; border-radius: 0;
-  cursor: pointer; touch-action: none;
+  border: 0 solid var(--line); border-width: 0 1px 0 1px; border-radius: 0;
+  cursor: pointer;
 }
 .cell + .cell { border-left-width: 0; }
 .cell:focus-visible { outline: 1px solid var(--muted); outline-offset: -4px; }
 .cell[hidden] { display: none; }
 
 /* The session cell's bottom edge is the progress line itself (2px), not a border. */
-.session { display: grid; min-width: 195px; padding: 0; border-bottom-width: 0; }
+.session { display: grid; min-width: 195px; padding: 0; }
+/* If the page's separator can't be found, draw our own 1px bottom edge instead. */
+.root.fallback .cell { height: var(--h); border-bottom-width: var(--bw); }
 .weekly { display: flex; align-items: center; gap: 16px; }
 
 .face {
@@ -282,11 +284,11 @@
 .flip { display: inline-block; perspective: 240px; }
 
 /* ---------- progress line (session utilisation) ---------- */
-.line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--line); z-index: 2; }
+.line { position: absolute; left: -1px; right: -1px; top: 100%; height: var(--bw); z-index: 2; pointer-events: none; }
 .fill {
   display: block; height: 100%; width: 0;
   background: linear-gradient(90deg, var(--fire-a), var(--fire-b));
-  transition: width 700ms cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 300ms ease;
+  transition: width 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 /* ---------- burn state ---------- */
@@ -296,7 +298,6 @@
 .session.burning .face.normal { opacity: 0; transform: translateY(-6px); }
 .session.burning .face.burn { opacity: 1; transform: none; }
 .session.burning .fire { animation: cuo-flicker 520ms ease-in-out infinite alternate; }
-.session.burning .fill { box-shadow: 0 0 10px 1px rgba(255, 120, 0, 0.75); }
 
 .flame {
   position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
@@ -669,11 +670,122 @@
 
   // ---------------------------------------------------------- open / position
 
-  function applyPos() {
-    const w = rootEl.offsetWidth || 330;
-    const max = Math.max(0, window.innerWidth / 2 - w / 2 - EDGE);
-    state.offsetX = Math.min(max, Math.max(-max, state.offsetX));
-    rootEl.style.left = `calc(50% + ${state.offsetX}px)`;
+  // ----------------------------------------------- alignment with the page
+
+  const FALLBACK_H = 45; // claude.ai: 44px bar + 1px separator (measured from a screenshot)
+  const dpr = () => window.devicePixelRatio || 1;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const layoutCache = { left: NaN, h: NaN, bw: NaN, fallback: null };
+  let composerRef = null;
+
+  const rectOf = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? r : null;
+  };
+
+  // The vertical axis the strip is centred on: the message composer. It is
+  // centred in the chat column, which is the middle of the space between the
+  // chat title (left) and the header buttons (right), and it follows the
+  // sidebar / side panel opening and closing. Falls back to <main>, then to
+  // the viewport centre.
+  function findAxis() {
+    if (composerRef && composerRef.isConnected) {
+      const r = rectOf(composerRef);
+      if (r && r.width >= 200) return r.left + r.width / 2;
+    }
+    composerRef = null;
+    for (const el of document.querySelectorAll('[contenteditable="true"], textarea')) {
+      const r = rectOf(el);
+      if (r && r.width >= 200 && r.bottom > 0 && r.top < window.innerHeight) {
+        composerRef = el.closest('fieldset') || el;
+        const cr = rectOf(composerRef) || r;
+        return cr.left + cr.width / 2;
+      }
+    }
+    const main = document.querySelector('main');
+    const mr = main && rectOf(main);
+    if (mr && mr.width >= 300) return mr.left + mr.width / 2;
+    return window.innerWidth / 2;
+  }
+
+  // Find the page header's separator (its bottom border) so the strip can end
+  // exactly on it. Returns {bottom, bw} or null.
+  function measureSeparator(axisX) {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    const vw = window.innerWidth;
+    const cands = new Set(document.querySelectorAll('header, [role="banner"]'));
+    for (const x of [axisX, vw * 0.25, vw * 0.75]) {
+      const px = Math.min(Math.max(x, 1), vw - 1);
+      for (const el of document.elementsFromPoint(px, 12)) cands.add(el);
+    }
+    const infos = [];
+    for (const el of cands) {
+      if (el === host || el === document.documentElement || el === document.body) continue;
+      const cs = getComputedStyle(el);
+      const hasBorder = cs.borderBottomStyle !== 'none' && cs.borderBottomStyle !== 'hidden';
+      const r = el.getBoundingClientRect();
+      infos.push({
+        top: r.top,
+        bottom: r.bottom,
+        width: r.width,
+        bw: hasBorder ? parseFloat(cs.borderBottomWidth) || 0 : 0,
+      });
+    }
+    return U.pickSeparator(infos);
+  }
+
+  // Returns true if anything moved/resized (used to keep the frame loop alive
+  // while the page animates, e.g. the sidebar sliding open).
+  function layout() {
+    const axis = findAxis();
+    observe(composerRef);
+    const sep = measureSeparator(axis);
+    const h = sep ? round2(sep.bottom) : FALLBACK_H;
+    const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
+    const left = U.centeredLeft(axis, rootEl.offsetWidth || 330, window.innerWidth, EDGE);
+    let changed = false;
+
+    if (left !== layoutCache.left) {
+      rootEl.style.left = `${left}px`;
+      layoutCache.left = left;
+      changed = true;
+    }
+    if (h !== layoutCache.h || bw !== layoutCache.bw) {
+      rootEl.style.setProperty('--h', `${h}px`);
+      rootEl.style.setProperty('--bw', `${bw}px`);
+      layoutCache.h = h;
+      layoutCache.bw = bw;
+      changed = true;
+    }
+    const fallback = !sep;
+    if (fallback !== layoutCache.fallback) {
+      rootEl.classList.toggle('fallback', fallback);
+      layoutCache.fallback = fallback;
+      changed = true;
+    }
+    if (changed && state.open) placePanel();
+    return changed;
+  }
+
+  let frame = 0;
+  let calm = 0;
+  function pump() {
+    frame = 0;
+    calm = layout() ? 0 : calm + 1;
+    if (calm < 30) frame = requestAnimationFrame(pump); // ~0.5s of calm, then sleep
+  }
+  function kick() {
+    calm = 0;
+    if (!frame) frame = requestAnimationFrame(pump);
+  }
+
+  const observed = new Set();
+  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(kick) : null;
+  function observe(el) {
+    if (resizeObserver && el && !observed.has(el)) {
+      observed.add(el);
+      resizeObserver.observe(el);
+    }
   }
 
   function placePanel() {
@@ -702,42 +814,7 @@
 
   // ------------------------------------------------------------ interactions
 
-  let drag = null;
-  let justDragged = false;
-
-  rootEl.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    const path = e.composedPath();
-    if (!path.includes(sessionBtn) && !path.includes(weeklyBtn)) return;
-    drag = { id: e.pointerId, x: e.clientX, start: state.offsetX, moved: false };
-    try { rootEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-  });
-
-  rootEl.addEventListener('pointermove', (e) => {
-    if (!drag || e.pointerId !== drag.id) return;
-    const dx = e.clientX - drag.x;
-    if (!drag.moved && Math.abs(dx) < 5) return;
-    drag.moved = true;
-    state.offsetX = drag.start + dx;
-    applyPos();
-    if (state.open) placePanel();
-  });
-
-  function endDrag(e) {
-    if (!drag || e.pointerId !== drag.id) return;
-    if (drag.moved) {
-      justDragged = true;
-      store.set({ [KEY_X]: state.offsetX });
-    }
-    drag = null;
-  }
-  rootEl.addEventListener('pointerup', endDrag);
-  rootEl.addEventListener('pointercancel', endDrag);
-
-  rootEl.addEventListener('click', () => {
-    if (justDragged) { justDragged = false; return; }
-    setOpen(!state.open);
-  });
+  rootEl.addEventListener('click', () => setOpen(!state.open));
   panel.addEventListener('click', (e) => e.stopPropagation());
 
   document.addEventListener('pointerdown', (e) => {
@@ -751,10 +828,9 @@
     }
   }, true);
 
-  window.addEventListener('resize', () => {
-    applyPos();
-    if (state.open) placePanel();
-  });
+  window.addEventListener('resize', kick);
+  // Sidebar toggles, navigation and composer swaps don't always fire resize.
+  setInterval(() => { if (!state.hidden) kick(); }, 500);
 
   // ------------------------------------------------------------------- boot
 
@@ -793,12 +869,14 @@
   }, CFG.finishCheckMs);
 
   (async function init() {
-    const saved = await store.get([KEY_X, KEY_HIDDEN]);
-    if (Number.isFinite(saved[KEY_X])) state.offsetX = saved[KEY_X];
+    const saved = await store.get([KEY_HIDDEN]);
     state.hidden = saved[KEY_HIDDEN] === true;
     injectFont();
     document.documentElement.appendChild(host);
-    applyPos();
+    observe(document.documentElement);
+    observe(rootEl);
+    layout();
+    kick();
     render();
     scheduleFlip();
     if (!state.hidden) refresh(true);

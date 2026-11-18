@@ -158,9 +158,34 @@
     return delta > 0 ? delta : 0;
   }
 
+  /**
+   * Which element's bottom border is the page header's separator line?
+   * cands: [{top, bottom, width, bw}] measured from the DOM (bw = bottom border
+   * width in px, 0 if none). Returns {bottom, bw} or null if nothing plausible.
+   * A header sits at the very top, is wide, and ends within ~36-72px.
+   */
+  function pickSeparator(cands) {
+    let best = null;
+    for (const c of cands) {
+      if (!(c.bw > 0)) continue;
+      if (c.top > 4 || c.width < 200) continue;
+      if (c.bottom < 36 || c.bottom > 72) continue;
+      if (!best || c.bottom > best.bottom) best = c;
+    }
+    return best ? { bottom: best.bottom, bw: best.bw } : null;
+  }
+
+  /** Whole-pixel left edge that centres a box of `width` on `axis`, kept inside the viewport. */
+  function centeredLeft(axis, width, viewportWidth, edge = 8) {
+    const max = Math.max(edge, viewportWidth - width - edge);
+    return Math.round(Math.min(Math.max(axis - width / 2, edge), max));
+  }
+
   const api = {
     parseUsage,
     primaryWindow,
+    pickSeparator,
+    centeredLeft,
     pickSession,
     pickWeekly,
     shortLabel,

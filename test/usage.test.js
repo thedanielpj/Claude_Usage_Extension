@@ -138,6 +138,37 @@ test('sessionDelta: ignores long gaps (sleeping laptop / background tab)', () =>
   assert.equal(U.sessionDelta(snap(10, 120), snap(40, 120), NaN), 0);
 });
 
+test('pickSeparator: finds the header border, ignores everything else', () => {
+  const header = { top: 0, bottom: 45, width: 1200, bw: 1 };
+  assert.deepEqual(U.pickSeparator([header]), { bottom: 45, bw: 1 });
+
+  const noise = [
+    { top: 0, bottom: 900, width: 260, bw: 1 }, // sidebar: far too tall
+    { top: 0, bottom: 45, width: 1200, bw: 0 }, // header-ish but no border
+    { top: 120, bottom: 160, width: 800, bw: 1 }, // not at the top
+    { top: 0, bottom: 30, width: 600, bw: 1 }, // too short
+    { top: 0, bottom: 45, width: 120, bw: 1 }, // too narrow
+  ];
+  assert.equal(U.pickSeparator(noise), null);
+  assert.deepEqual(U.pickSeparator([...noise, header]), { bottom: 45, bw: 1 });
+  assert.equal(U.pickSeparator([]), null);
+});
+
+test('pickSeparator: handles sub-pixel borders and picks the lowest valid edge', () => {
+  const a = { top: 0, bottom: 44.5, width: 900, bw: 0.5 };
+  const b = { top: 0, bottom: 45, width: 900, bw: 1 };
+  assert.deepEqual(U.pickSeparator([a]), { bottom: 44.5, bw: 0.5 });
+  assert.deepEqual(U.pickSeparator([a, b]), { bottom: 45, bw: 1 });
+});
+
+test('centeredLeft: centres on the axis, keeps the box inside the viewport', () => {
+  assert.equal(U.centeredLeft(500, 300, 1000), 350);
+  assert.equal(U.centeredLeft(500.4, 301, 1000), 350); // whole pixels
+  assert.equal(U.centeredLeft(10, 300, 1000), 8); // clamp left
+  assert.equal(U.centeredLeft(990, 300, 1000), 692); // clamp right
+  assert.equal(U.centeredLeft(500, 2000, 1000), 8); // wider than viewport
+});
+
 test('formatAgo', () => {
   assert.equal(U.formatAgo(1000), 'just now');
   assert.equal(U.formatAgo(42 * 1000), '42s ago');
