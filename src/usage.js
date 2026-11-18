@@ -159,20 +159,33 @@
   }
 
   /**
-   * Which element's bottom border is the page header's separator line?
-   * cands: [{top, bottom, width, bw}] measured from the DOM (bw = bottom border
-   * width in px, 0 if none). Returns {bottom, bw} or null if nothing plausible.
-   * A header sits at the very top, is wide, and ends within ~36-72px.
+   * Which element draws the page header's separator line?
+   *
+   * cands come from the DOM, in one of two shapes:
+   *  - {kind:'border', top, bottom, width, bw}: an element with a bottom border
+   *    (bw = border width in px, 0 if none), sitting at the top of the page.
+   *  - {kind:'line', top, bottom, width}: a hairline element that IS the line
+   *    (claude.ai draws it as a ~1-device-pixel-tall div inside the title bar).
+   *    Its thickness is its own height.
+   *
+   * kind defaults to 'border'. Returns {bottom, bw} (the lowest plausible
+   * match) or null. A header ends within ~36-72px of the top of the page.
    */
   function pickSeparator(cands) {
     let best = null;
     for (const c of cands) {
-      if (!(c.bw > 0)) continue;
-      if (c.top > 4 || c.width < 200) continue;
-      if (c.bottom < 36 || c.bottom > 72) continue;
-      if (!best || c.bottom > best.bottom) best = c;
+      let bw;
+      let ok;
+      if (c.kind === 'line') {
+        bw = c.bottom - c.top;
+        ok = bw > 0 && bw <= 3 && c.width >= 200 && c.bottom >= 36 && c.bottom <= 72;
+      } else {
+        bw = c.bw;
+        ok = bw > 0 && c.top <= 4 && c.width >= 200 && c.bottom >= 36 && c.bottom <= 72;
+      }
+      if (ok && (!best || c.bottom > best.bottom)) best = { bottom: c.bottom, bw };
     }
-    return best ? { bottom: best.bottom, bw: best.bw } : null;
+    return best;
   }
 
   /** Whole-pixel left edge that centres a box of `width` on `axis`, kept inside the viewport. */

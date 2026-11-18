@@ -716,30 +716,61 @@
     const cands = new Set(document.querySelectorAll('header, [role="banner"]'));
     for (const x of [axisX, vw * 0.25, vw * 0.75]) {
       const px = Math.min(Math.max(x, 1), vw - 1);
-      for (const el of document.elementsFromPoint(px, 12)) cands.add(el);
+      for (const hit of document.elementsFromPoint(px, 12)) {
+        // The title-bar wrapper can be pointer-events:none (so hit-testing skips
+        // it), but it is always an ancestor of something that is hit.
+        let el = hit;
+        for (let i = 0; i < 8 && el && el !== document.body; i++, el = el.parentElement) cands.add(el);
+      }
     }
+
     const infos = [];
+    const band = [];
     for (const el of cands) {
       if (el === host || el === document.documentElement || el === document.body) continue;
+      const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
       const hasBorder = cs.borderBottomStyle !== 'none' && cs.borderBottomStyle !== 'hidden';
-      const r = el.getBoundingClientRect();
       infos.push({
+        kind: 'border',
         top: r.top,
         bottom: r.bottom,
         width: r.width,
         bw: hasBorder ? parseFloat(cs.borderBottomWidth) || 0 : 0,
       });
+      if (r.top <= 4 && r.bottom <= 90) band.push(el);
+    }
+
+    // claude.ai draws the separator as a hairline element (a pointer-events:none
+    // div about one device pixel tall), not as a border. Hit-testing can't see
+    // it, but it is a child of something in the header band, so look there.
+    const lookAt = (el) => {
+      const r = el.getBoundingClientRect();
+      if (r.height > 0 && r.height <= 3) {
+        infos.push({ kind: 'line', top: r.top, bottom: r.bottom, width: r.width });
+      }
+    };
+    for (const el of band) {
+      for (const child of Array.from(el.children).slice(0, 40)) {
+        lookAt(child);
+        for (const grand of Array.from(child.children).slice(0, 20)) lookAt(grand);
+      }
     }
     return U.pickSeparator(infos);
   }
 
   // Returns true if anything moved/resized (used to keep the frame loop alive
   // while the page animates, e.g. the sidebar sliding open).
+  let sepCache = null;
+  let scanDue = true;
   function layout() {
     const axis = findAxis();
     observe(composerRef);
-    const sep = measureSeparator(axis);
+    if (scanDue) {
+      sepCache = measureSeparator(axis);
+      scanDue = false;
+    }
+    const sep = sepCache;
     const h = sep ? round2(sep.bottom) : FALLBACK_H;
     const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
     const left = U.centeredLeft(axis, rootEl.offsetWidth || 330, window.innerWidth, EDGE);
@@ -774,13 +805,14 @@
     calm = layout() ? 0 : calm + 1;
     if (calm < 30) frame = requestAnimationFrame(pump); // ~0.5s of calm, then sleep
   }
-  function kick() {
+  function kick(scan = true) {
+    if (scan) scanDue = true;
     calm = 0;
     if (!frame) frame = requestAnimationFrame(pump);
   }
 
   const observed = new Set();
-  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(kick) : null;
+  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => kick(false)) : null;
   function observe(el) {
     if (resizeObserver && el && !observed.has(el)) {
       observed.add(el);

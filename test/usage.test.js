@@ -161,6 +161,30 @@ test('pickSeparator: handles sub-pixel borders and picks the lowest valid edge',
   assert.deepEqual(U.pickSeparator([a, b]), { bottom: 45, bw: 1 });
 });
 
+test('pickSeparator: hairline element that IS the separator (claude.ai chat pages)', () => {
+  // Measured on claude.ai at 1.5x zoom: a div 44.33..45.00 tall, 1419 wide.
+  const hairline = { kind: 'line', top: 44.33, bottom: 45, width: 1419 };
+  const sep = U.pickSeparator([hairline]);
+  assert.equal(sep.bottom, 45);
+  assert.ok(Math.abs(sep.bw - 0.67) < 0.01, `bw ${sep.bw}`);
+
+  // Header bar with no border of its own must not be mistaken for the line.
+  const bar = { kind: 'border', top: 0, bottom: 45, width: 1409, bw: 0 };
+  assert.equal(U.pickSeparator([bar]), null);
+  assert.equal(U.pickSeparator([bar, hairline]).bottom, 45);
+});
+
+test('pickSeparator: rejects hairline-shaped things that are not the header line', () => {
+  const bad = [
+    { kind: 'line', top: 44, bottom: 52, width: 1400 }, // 8px tall: a bar, not a hairline
+    { kind: 'line', top: 300, bottom: 301, width: 1400 }, // far below the header
+    { kind: 'line', top: 44.3, bottom: 45, width: 80 }, // too narrow (e.g. an icon underline)
+    { kind: 'line', top: 10, bottom: 11, width: 1400 }, // too high: part of the bar itself
+    { kind: 'line', top: 44, bottom: 44, width: 1400 }, // zero height
+  ];
+  assert.equal(U.pickSeparator(bad), null);
+});
+
 test('centeredLeft: centres on the axis, keeps the box inside the viewport', () => {
   assert.equal(U.centeredLeft(500, 300, 1000), 350);
   assert.equal(U.centeredLeft(500.4, 301, 1000), 350); // whole pixels
