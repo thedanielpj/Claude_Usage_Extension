@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Claude Usage Overlay",
+  "name": "Usage Overlay for Claude",
   "version": "0.1.0",
-  "description": "A small, draggable overlay on claude.ai that shows your session and weekly usage limits with reset countdowns.",
+  "description": "Independent overlay on claude.ai showing your session and weekly usage limits with reset countdowns. Not affiliated with Anthropic.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
