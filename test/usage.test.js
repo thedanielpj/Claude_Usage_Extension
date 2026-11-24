@@ -249,3 +249,57 @@ test('burn power steps up with the tier', () => {
   assert.equal(U.burnPower(500), 1);
   assert.equal(U.burnPower(NaN), 0);
 });
+
+test('placeOverlay: stays centred when the header is clear', () => {
+  assert.equal(U.placeOverlay([], 350, 300, 1000), 350);
+  // title ends well before the strip starts
+  assert.equal(U.placeOverlay([{ l: 100, r: 300, ctl: false }], 350, 300, 1000), 350);
+});
+
+test('placeOverlay: slides right past a long title', () => {
+  // title runs to x=420; strip needs 12px of air after it
+  assert.equal(U.placeOverlay([{ l: 100, r: 420, ctl: false }], 350, 300, 1000), 432);
+  // a title that only touches the strip's margin still moves it
+  assert.equal(U.placeOverlay([{ l: 100, r: 345, ctl: false }], 350, 300, 1000), 357);
+});
+
+test('placeOverlay: chains past several items', () => {
+  const items = [
+    { l: 100, r: 420, ctl: false },
+    { l: 436, r: 480, ctl: true }, // a button right after the title
+  ];
+  assert.equal(U.placeOverlay(items, 350, 300, 1000), 492);
+});
+
+test('placeOverlay: no room on the right -> hug the buttons, let the title go under', () => {
+  const items = [
+    { l: 100, r: 700, ctl: false }, // very long title
+    { l: 880, r: 960, ctl: true }, // share button
+  ];
+  // furthest right that still clears the button: 880 - 12 - 300
+  assert.equal(U.placeOverlay(items, 350, 300, 1000), 568);
+});
+
+test('placeOverlay: no room and nothing to dodge on the right -> viewport edge', () => {
+  assert.equal(U.placeOverlay([{ l: 100, r: 900, ctl: false }], 350, 300, 1000), 692);
+});
+
+test('placeOverlay: falls back to centred when buttons leave no room at all', () => {
+  const items = [
+    { l: 100, r: 700, ctl: false },
+    { l: 8, r: 500, ctl: true },
+    { l: 510, r: 990, ctl: true },
+  ];
+  assert.equal(U.placeOverlay(items, 350, 300, 1000), 350);
+});
+
+test('placeOverlay: crowded header -> moves left of the buttons rather than covering them', () => {
+  // centred (354..) would cover the button at 681; nearest button-free spot is just left of it
+  const items = [{ l: 276, r: 500, ctl: false }, { l: 681, r: 760, ctl: true }];
+  assert.equal(U.placeOverlay(items, 354, 338, 800), 331);
+});
+
+test('placeOverlay: ignores items far to the left or right of the strip', () => {
+  const items = [{ l: 20, r: 200, ctl: true }, { l: 800, r: 980, ctl: true }];
+  assert.equal(U.placeOverlay(items, 350, 300, 1000), 350);
+});

@@ -802,6 +802,7 @@
 
     const infos = [];
     const band = [];
+    bandEls = band;
     for (const el of cands) {
       if (el === host || el === document.documentElement || el === document.body) continue;
       const r = el.getBoundingClientRect();
@@ -839,6 +840,40 @@
   // while the page animates, e.g. the sidebar sliding open).
   let sepCache = null;
   let scanDue = true;
+  let itemsDue = true;
+  let bandEls = [];
+  let headerItems = [];
+
+  // What the page header already shows (chat title text, buttons, icons), as horizontal
+  // extents, so the strip can slide right instead of covering a long title.
+  const CTL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"], img, svg';
+  function measureHeaderItems(h) {
+    const out = [];
+    const vw = window.innerWidth;
+    const inBand = (r) => r.width > 0 && r.height > 0 && r.bottom > 2 && r.top < h - 2;
+    const visible = (el) => !el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true });
+    let budget = 800; // cap the work on very large headers
+    const range = document.createRange();
+    const roots = bandEls.filter((e) => e.isConnected && !bandEls.some((o) => o !== e && o.contains(e)));
+    for (const bandEl of roots) {
+      const walker = document.createTreeWalker(bandEl, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n && budget > 0; n = walker.nextNode(), budget--) {
+        if (n.nodeType === 3) {
+          if (!n.nodeValue.trim()) continue;
+          const parent = n.parentElement;
+          if (!parent || host.contains(parent) || !visible(parent)) continue;
+          range.selectNodeContents(n);
+          const r = range.getBoundingClientRect();
+          if (inBand(r)) out.push({ l: r.left, r: r.right, ctl: false });
+        } else if (n.matches(CTL_SELECTOR) && !host.contains(n) && visible(n)) {
+          const r = n.getBoundingClientRect();
+          // a control stretched across most of the header is a layout wrapper, not a button
+          if (inBand(r) && r.width < vw * 0.6) out.push({ l: r.left, r: r.right, ctl: true });
+        }
+      }
+    }
+    return out;
+  }
   function layout() {
     const axis = findAxis();
     observe(composerRef);
@@ -849,7 +884,14 @@
     const sep = sepCache;
     const h = sep ? round2(sep.bottom) : FALLBACK_H;
     const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
-    const left = U.centeredLeft(axis, rootEl.offsetWidth || 330, window.innerWidth, EDGE);
+    const width = rootEl.offsetWidth || 330;
+    if (itemsDue) {
+      headerItems = measureHeaderItems(h);
+      itemsDue = false;
+    }
+    // Centred on the composer; if that would sit on the chat title or buttons, slide right.
+    const centered = U.centeredLeft(axis, width, window.innerWidth, EDGE);
+    const left = U.placeOverlay(headerItems, centered, width, window.innerWidth, EDGE);
     let changed = false;
 
     if (left !== layoutCache.left) {
@@ -882,6 +924,7 @@
     if (calm < 30) frame = requestAnimationFrame(pump); // ~0.5s of calm, then sleep
   }
   function kick(scan = true) {
+    itemsDue = true;
     if (scan) scanDue = true;
     calm = 0;
     if (!frame) frame = requestAnimationFrame(pump);

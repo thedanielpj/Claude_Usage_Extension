@@ -195,6 +195,39 @@
   }
 
   /**
+   * Left edge for the strip so it doesn't sit on top of the page header's content.
+   *
+   * items: [{l, r, ctl}] horizontal extents of what the header already shows (ctl = a
+   * button/link/icon, otherwise text such as the chat title). `centered` is where the
+   * strip wants to be. It stays there if the spot is clear; otherwise it slides right to
+   * the first clear spot. If there is no room on the right, it takes the spot nearest to
+   * centred that stays off the buttons, and the title text may run underneath (fine).
+   */
+  function placeOverlay(items, centered, width, viewportWidth, edge = 8, gap = 12) {
+    const maxLeft = Math.max(edge, viewportWidth - width - edge);
+    const hits = (p, list) => list.filter((i) => i.r > p - gap && i.l < p + width + gap);
+
+    let p = centered;
+    for (let n = 0; n <= items.length; n++) {
+      const h = hits(p, items);
+      if (!h.length) {
+        if (p <= maxLeft) return Math.round(p);
+        break;
+      }
+      p = Math.max(...h.map((i) => i.r)) + gap;
+      if (p > maxLeft) break;
+    }
+
+    // No fully clear spot: stay off the buttons, nearest to centred (title text may run under).
+    const ctl = items.filter((i) => i.ctl);
+    const cands = [maxLeft, ...ctl.map((i) => i.l - gap - width), ...ctl.map((i) => i.r + gap)]
+      .filter((c) => c >= edge && c <= maxLeft)
+      .sort((a, b) => Math.abs(a - centered) - Math.abs(b - centered) || b - a);
+    for (const c of cands) if (!hits(c, ctl).length) return Math.round(c);
+    return Math.round(centered);
+  }
+
+  /**
    * Fun word shown in place of the "session" label while the burn animation runs.
    * Picked at random from a pool chosen by how much was just used. Spelling is
    * intentional. Tiers: +1 | 2-7 | 8-15 | 16-40 | 41+.
@@ -227,6 +260,7 @@
     primaryWindow,
     pickSeparator,
     centeredLeft,
+    placeOverlay,
     pickSession,
     pickWeekly,
     shortLabel,

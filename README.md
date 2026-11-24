@@ -54,6 +54,7 @@ Windows are discovered generically (any object with a numeric `utilization`), so
 
 - *Bottom edge:* it finds the header's separator line at runtime (the header's bottom border), ends the strip just above it, and draws the progress fill in that same row with the same thickness. If it can't find a separator it falls back to a 45px strip with its own 1px bottom edge.
 - *Horizontal position:* it centres on the message composer's vertical axis, which is the middle of the chat column (between the chat title on the left and the header buttons on the right). It follows the composer as the sidebar or a side panel opens and closes, and falls back to `<main>`, then the viewport centre, on pages with no composer.
+- *Auto-layout:* if a long chat title or file name would run under the strip, the strip slides right to the first clear spot. If there's no room on the right it stays clear of the header buttons (the nearest spot to centre) and the title text may run underneath.
 
 ### Caveats
 
