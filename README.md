@@ -11,7 +11,7 @@ A small Chrome extension that docks a flat usage strip to the top of [claude.ai]
 
 - **Session cell:** label, time until the 5-hour window resets, and the percentage used. The gradient progress fill sits on the page's own header separator line, with exactly the same thickness, so it reads as part of that line.
 - **Weekly cell:** the weekly percentage. Every 30 seconds it flips to the time left (`3d 4h`), holds for about 6 seconds, and flips back.
-- **Fire animation:** when you finish a prompt and session usage jumps (say 10% to 15%), the session cell lights up with flames and shows `+5%` for 5 seconds, then settles back to normal.
+- **Burn animation:** when you finish a prompt and session usage jumps (say 10% to 15%), a jet-thrust flame shoots across the session cell from right to left. A fun word replaces `session` and `+5%` replaces the percentage for about 5 seconds, then the flame slowly dies out and the cell settles back to normal. With reduced motion on, you get a still flame instead.
 - **Details:** click the strip to drop down every limit (per-model weekly caps, extra usage) with reset times.
 - Click the toolbar icon and use the switch to hide or show the strip.
 - No account, no API key, no analytics, no remote servers.
@@ -71,7 +71,8 @@ npm test        # unit tests for parsing, formatting and the +N% logic (Node 20+
 ```
 manifest.json      MV3 manifest
 src/usage.js       pure parsing/formatting/delta helpers (unit-tested)
-src/content.js     the strip: UI (shadow DOM), fetching, flip, fire animation, drag
+src/content.js     the strip: UI (shadow DOM), fetching, flip, burn animation, drag
+src/flame.js       flame frames for the burn animation (generated vector paths)
 popup.html/css/js  toolbar popup (on/off switch + privacy link)
 fonts/             Inter (variable, latin subset), SIL Open Font License
 test/              node:test unit tests
@@ -80,7 +81,7 @@ icons/             16/48/128 px icons
 
 ### Tweaking the design
 
-All styling is in the `CSS` string near the top of `src/content.js`. The palette is a handful of CSS variables on `.root` (`--bg`, `--line`, `--muted`, `--fg`, `--fire-a`, `--fire-b`). The timings (poll interval, weekly flip interval and hold, fire hold) are in the `CFG` object at the top of the same file.
+All styling is in the `CSS` string near the top of `src/content.js`. The palette is a handful of CSS variables on `.root` (`--bg`, `--line`, `--muted`, `--fg`, `--fire-a`, `--fire-b`). The timings (poll interval, weekly flip interval and hold, burn hold and die-out) are in the `CFG` object at the top of the same file.
 
 ## Not affiliated with Anthropic
 

@@ -198,3 +198,43 @@ test('formatAgo', () => {
   assert.equal(U.formatAgo(42 * 1000), '42s ago');
   assert.equal(U.formatAgo(3 * 60 * 1000), '3m ago');
 });
+
+test('burn word pool is locked per tier', () => {
+  const tiers = U.BURN_WORDS.map((t) => t.words.join(' '));
+  assert.deepEqual(tiers, [
+    'sparked sizzled noice tidy neat clean burnt crisp cute',
+    'toasted scorched torched blazed solid sheesh bussin cooked smooth',
+    'blasted kaboom ouch daammn yowza banger',
+    'nuked wildfire lessgoo massive absurd',
+    'shattered legend godmode cinema',
+  ]);
+});
+
+test('burn word tier boundaries', () => {
+  const first = () => 0;
+  const pool = (i) => U.BURN_WORDS[i].words;
+  assert.equal(U.pickBurnWord(1, first), pool(0)[0]);
+  assert.equal(U.pickBurnWord(2, first), pool(1)[0]);
+  assert.equal(U.pickBurnWord(7, first), pool(1)[0]);
+  assert.equal(U.pickBurnWord(8, first), pool(2)[0]);
+  assert.equal(U.pickBurnWord(15, first), pool(2)[0]);
+  assert.equal(U.pickBurnWord(16, first), pool(3)[0]);
+  assert.equal(U.pickBurnWord(40, first), pool(3)[0]);
+  assert.equal(U.pickBurnWord(41, first), pool(4)[0]);
+  assert.equal(U.pickBurnWord(100, first), pool(4)[0]);
+});
+
+test('burn word picks across the whole tier and tolerates rng edges', () => {
+  const last = (i) => U.BURN_WORDS[i].words[U.BURN_WORDS[i].words.length - 1];
+  assert.equal(U.pickBurnWord(3, () => 0.999999), last(1));
+  assert.equal(U.pickBurnWord(3, () => 1), last(1)); // rng must not index out of range
+  const seen = new Set();
+  for (let n = 0; n < 9; n++) seen.add(U.pickBurnWord(1, () => n / 9));
+  assert.equal(seen.size, 9);
+});
+
+test('burn word falls back to the smallest tier for odd input', () => {
+  for (const bad of [0, -3, NaN, undefined]) {
+    assert.ok(U.BURN_WORDS[0].words.includes(U.pickBurnWord(bad)));
+  }
+});

@@ -30,7 +30,9 @@
       tickMs: 15 * 1000, // re-render countdowns
       flipEveryMs: 30 * 1000, // weekly: how often to flip to time-left
       flipHoldMs: 6 * 1000, // weekly: how long time-left stays up
-      burnHoldMs: 5 * 1000, // fire animation hold
+      burnHoldMs: 5 * 1000, // flame + word hold
+      burnFadeMs: 1600, // slow die-out after the hold
+      flameFrameMs: 70, // flame frame step (~14 fps)
       finishCheckMs: 1000, // how often to look for "generation finished"
       finishRefreshAfterMs: [1500, 6000, 15000], // refresh attempts after a prompt finishes
     },
@@ -150,7 +152,7 @@
     hidden: false,
     weeklyFace: 'pct', // pct | time
     flipping: false,
-    burn: null, // { delta, timer }
+    burn: null, // { delta, word, fading, timer, fadeTimer }
   };
 
   const snapshotOf = (parsed) => {
@@ -292,61 +294,44 @@
 }
 
 /* ---------- burn state ---------- */
-.face.burn { opacity: 0; transform: translateY(6px); gap: 8px; pointer-events: none; }
-.burn .delta { font-weight: 600; color: #ffb27a; }
-.fire { width: 20px; height: 20px; flex: none; transform-origin: 50% 100%; }
-.session.burning .face.normal { opacity: 0; transform: translateY(-6px); }
-.session.burning .face.burn { opacity: 1; transform: none; }
-.session.burning .fire { animation: cuo-flicker 520ms ease-in-out infinite alternate; }
-
-.flame {
-  position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
-  background: linear-gradient(90deg, rgba(255, 85, 0, 0.21) 0%, rgba(242, 141, 0, 0.21) 100%);
-  transform: scaleX(-1);
-  opacity: 0; transition: opacity 450ms ease;
+/* Orange tint + a jet-thrust flame fill the session cell. The fun word and +N% take the
+   label/percentage slots and glow light yellow on top of it. */
+.fx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.tint {
+  position: absolute; inset: 0; opacity: 0;
+  background: linear-gradient(270deg, rgba(255, 90, 10, 0.34), rgba(255, 130, 20, 0.12) 70%, rgba(255, 130, 20, 0.05));
+  transition: opacity 400ms ease;
 }
-.session.burning .flame { opacity: 1; }
-.flame::before, .flame::after {
-  content: ""; position: absolute; left: -10%; right: -10%; bottom: -35%; height: 150%;
-  transform-origin: 50% 100%;
+.session.burning .tint { opacity: 1; animation: cuo-tint 260ms steps(1, end) infinite; }
+.session.burning.fading .tint { opacity: 0; animation: none; transition: opacity 1500ms ease-in; }
+.thrust {
+  position: absolute; right: -3%; top: -16%; width: 128%; height: 132%;
+  transform-origin: 100% 50%; transform: translateX(100%); opacity: 0;
 }
-.flame::before {
-  background:
-    radial-gradient(38% 80% at 14% 100%, rgba(255, 85, 0, 0.9), transparent 72%),
-    radial-gradient(34% 100% at 50% 100%, rgba(242, 141, 0, 0.85), transparent 72%),
-    radial-gradient(38% 82% at 86% 100%, rgba(255, 85, 0, 0.9), transparent 72%);
-  animation: cuo-lick 880ms ease-in-out infinite alternate;
+.session.burning .thrust {
+  opacity: 1; transform: none;
+  transition: transform 190ms cubic-bezier(0.05, 0.9, 0.2, 1), opacity 60ms linear;
 }
-.flame::after {
-  background:
-    radial-gradient(30% 70% at 30% 100%, rgba(255, 190, 60, 0.7), transparent 72%),
-    radial-gradient(30% 76% at 70% 100%, rgba(255, 160, 30, 0.7), transparent 72%);
-  animation: cuo-lick 640ms ease-in-out infinite alternate-reverse;
+.session.burning.fading .thrust {
+  opacity: 0; transform: translateX(30%) scaleX(0.7);
+  transition: transform 1500ms ease-in, opacity 1500ms ease-in;
 }
-.ember {
-  position: absolute; bottom: 4px; width: 3px; height: 3px; border-radius: 50%;
-  background: #ffc15a; box-shadow: 0 0 4px 1px rgba(255, 150, 40, 0.8); opacity: 0;
+.thrust g.f { display: none; }
+.thrust g.f.on { display: inline; }
+.session.burning .head > span, .session.burning .head > .dot, .session.burning .pct {
+  color: #fff1a8;
+  text-shadow: 0 0 8px rgba(255, 214, 102, 0.5), 0 0 2px rgba(70, 15, 0, 0.85), 0 1px 1px rgba(70, 15, 0, 0.8);
+  transition: color 300ms ease, text-shadow 300ms ease;
 }
-.session.burning .ember { animation: cuo-ember 1400ms ease-out infinite; }
-.ember:nth-child(1) { left: 18%; animation-delay: 0ms; }
-.ember:nth-child(2) { left: 46%; animation-delay: 420ms; }
-.ember:nth-child(3) { left: 71%; animation-delay: 840ms; }
-.ember:nth-child(4) { left: 88%; animation-delay: 210ms; }
-
-@keyframes cuo-lick {
-  0%   { transform: scaleY(0.78) skewX(-3deg); opacity: 0.7; }
-  50%  { transform: scaleY(1.05) skewX(2deg);  opacity: 1; }
-  100% { transform: scaleY(0.9)  skewX(-1deg); opacity: 0.82; }
+.session.burning .head > .dot { background: #fff1a8; box-shadow: none; }
+.session.burning .pct, .session.burning .head > span:first-child { font-weight: 600; }
+.session.burning .face { gap: 10px; } /* longest words (e.g. "shattered") must not widen the cell */
+.session.burning .head { gap: 6px; }
+.session.burning.fading .head > span, .session.burning.fading .pct {
+  color: var(--fg); text-shadow: none; transition: color 1500ms ease-in, text-shadow 1500ms ease-in;
 }
-@keyframes cuo-flicker {
-  0%   { transform: scale(1, 0.94) rotate(-2deg); }
-  100% { transform: scale(1.06, 1.08) rotate(2deg); }
-}
-@keyframes cuo-ember {
-  0%   { transform: translateY(0); opacity: 0; }
-  15%  { opacity: 0.95; }
-  100% { transform: translateY(-30px) translateX(4px); opacity: 0; }
-}
+.session.burning.fading .head > span { color: var(--muted); }
+@keyframes cuo-tint { 0% { opacity: 1; } 35% { opacity: 0.72; } 60% { opacity: 0.9; } 80% { opacity: 0.6; } }
 
 /* ---------- details dropdown ---------- */
 .panel {
@@ -391,22 +376,41 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .face, .flame, .fill, .bar > span { transition: none; }
-  .flame::before, .flame::after, .session.burning .fire, .session.burning .ember { animation: none; }
-  .ember { display: none; }
+  .face, .fill, .bar > span, .tint, .thrust, .session * { transition: none !important; }
+  .session.burning .tint { animation: none; opacity: 0.85; }
 }
 `;
 
   // ------------------------------------------------------------------ build
 
-  const FIRE_SVG =
-    '<svg class="fire" viewBox="0 0 24 24" aria-hidden="true">' +
-    '<defs><linearGradient id="cuo-fg" x1="0" y1="0" x2="0" y2="1">' +
-    '<stop offset="0" stop-color="#f28d00"/><stop offset="1" stop-color="#ff4d00"/>' +
-    '</linearGradient></defs>' +
-    '<path d="M12 2c.6 3.2 3.6 5.2 5 8.2 1.3 2.7.9 6-.6 8.1C15.1 20 13.7 21 12 21c-2.6 0-5-2-5.7-4.7-.6-2.3.2-4.3 1.5-5.9.4 1.2 1 2 2 2.4C9.400 9 10.200 5 12 2z" fill="url(#cuo-fg)"/>' +
-    '<path d="M12 12.500c.8 1.500 2.500 2.300 2.500 4.500 0 1.600-1.100 2.600-2.500 2.600S9.500 18.600 9.500 17.200c0-1.700 1.700-2.700 2.500-4.700z" fill="#ffe2a8"/>' +
-    '</svg>';
+  // Flame frames live in src/flame.js (generated). Built once; only one frame is visible at a time.
+  const FLAME = window.ClaudeFlame;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+  const flameFrames = [];
+  function buildThrust() {
+    const svg = svgEl('svg', {
+      class: 'thrust', viewBox: `0 0 ${FLAME.w} ${FLAME.h}`, preserveAspectRatio: 'none', 'aria-hidden': 'true',
+    });
+    const defs = svgEl('defs', {});
+    const grad = svgEl('linearGradient', { id: 'cuo-thrust', gradientUnits: 'userSpaceOnUse', x1: FLAME.w, y1: 0, x2: 0, y2: 0 });
+    // Deep red-orange at the nozzle (under the number), thinning out toward the word so both stay legible.
+    [['0', '#b82a07', '1'], ['0.4', '#cc380a', '0.95'], ['1', '#ec6218', '0.5']].forEach(([o, c, a]) =>
+      grad.appendChild(svgEl('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+    FLAME.frames.forEach((paths) => {
+      const g = svgEl('g', { class: 'f', fill: 'url(#cuo-thrust)' });
+      paths.forEach((d) => g.appendChild(svgEl('path', { d })));
+      svg.appendChild(g);
+      flameFrames.push(g);
+    });
+    return svg;
+  }
 
   const host = document.createElement('div');
   host.id = 'cuo-host';
@@ -417,18 +421,13 @@
   const dotEl = h('i', { class: 'dot' });
   const etaEl = h('span');
   const pctEl = h('span', { class: 'pct' });
-  const fireWrap = h('span');
-  fireWrap.innerHTML = FIRE_SVG;
-  const deltaEl = h('span', { class: 'delta' });
   const fillEl = h('span', { class: 'fill' });
 
   const sessionBtn = h('button', { class: 'cell session', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false' },
-    h('span', { class: 'flame', 'aria-hidden': 'true' },
-      h('i', { class: 'ember' }), h('i', { class: 'ember' }), h('i', { class: 'ember' }), h('i', { class: 'ember' })),
+    h('span', { class: 'fx', 'aria-hidden': 'true' }, h('span', { class: 'tint' }), buildThrust()),
     h('span', { class: 'face normal' },
       h('span', { class: 'head' }, labelEl, dotEl, etaEl),
       pctEl),
-    h('span', { class: 'face burn', 'aria-hidden': 'true' }, fireWrap.firstChild, deltaEl),
     h('span', { class: 'line' }, fillEl));
 
   // weekly cell
@@ -513,8 +512,14 @@
       weeklyBtn.setAttribute('aria-label', `weekly usage ${Math.round(w.pct)}%${reset}. Show details.`);
     }
 
-    sessionBtn.classList.toggle('burning', !!state.burn);
-    if (state.burn) deltaEl.textContent = `+${state.burn.delta}%`;
+    const burning = !!(state.burn && s);
+    sessionBtn.classList.toggle('burning', burning);
+    sessionBtn.classList.toggle('fading', burning && state.burn.fading);
+    if (burning) {
+      labelEl.textContent = state.burn.word;
+      pctEl.textContent = `+${state.burn.delta}%`;
+    }
+    setThrust(burning);
   }
 
   function barRow(win, now) {
@@ -574,11 +579,50 @@
     setTimeout(() => { live.textContent = text; }, 50);
   }
 
+  let thrustTimer = 0;
+  let frameIdx = 0;
+  function showFrame(i) {
+    flameFrames.forEach((g, n) => g.classList.toggle('on', n === i));
+  }
+  /** Runs the frame loop only while the burn is on screen; static frame under reduced motion. */
+  function setThrust(on) {
+    if (on && !thrustTimer) {
+      if (reducedMotion) {
+        showFrame(4);
+        thrustTimer = -1;
+      } else {
+        showFrame(frameIdx);
+        thrustTimer = setInterval(() => {
+          frameIdx = (frameIdx + 1) % flameFrames.length;
+          showFrame(frameIdx);
+        }, CFG.flameFrameMs);
+      }
+    } else if (!on && thrustTimer) {
+      if (thrustTimer > 0) clearInterval(thrustTimer);
+      thrustTimer = 0;
+    }
+  }
+
   function burn(delta) {
-    const total = (state.burn ? state.burn.delta : 0) + delta;
-    if (state.burn) clearTimeout(state.burn.timer);
-    state.burn = { delta: total, timer: setTimeout(endBurn, CFG.burnHoldMs) };
+    // A burn that arrives while the previous one is dying out starts a fresh burst.
+    const fresh = !state.burn || state.burn.fading;
+    const total = (fresh ? 0 : state.burn.delta) + delta;
+    if (state.burn) { clearTimeout(state.burn.timer); clearTimeout(state.burn.fadeTimer); }
+    state.burn = {
+      delta: total,
+      word: U.pickBurnWord(total),
+      fading: false,
+      timer: setTimeout(fadeBurn, CFG.burnHoldMs),
+      fadeTimer: 0,
+    };
     announce(`Session usage up ${total}%`);
+    render();
+  }
+
+  function fadeBurn() {
+    if (!state.burn) return;
+    state.burn.fading = true;
+    state.burn.fadeTimer = setTimeout(endBurn, reducedMotion ? 0 : CFG.burnFadeMs);
     render();
   }
 

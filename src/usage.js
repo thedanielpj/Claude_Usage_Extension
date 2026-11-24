@@ -194,6 +194,27 @@
     return Math.round(Math.min(Math.max(axis - width / 2, edge), max));
   }
 
+  /**
+   * Fun word shown in place of the "session" label while the burn animation runs.
+   * Picked at random from a pool chosen by how much was just used. Spelling is
+   * intentional. Tiers: +1 | 2-7 | 8-15 | 16-40 | 41+.
+   */
+  const BURN_WORDS = [
+    { max: 1, words: ['sparked', 'sizzled', 'noice', 'tidy', 'neat', 'clean', 'burnt', 'crisp', 'cute'] },
+    { max: 7, words: ['toasted', 'scorched', 'torched', 'blazed', 'solid', 'sheesh', 'bussin', 'cooked', 'smooth'] },
+    { max: 15, words: ['blasted', 'kaboom', 'ouch', 'daammn', 'yowza', 'banger'] },
+    { max: 40, words: ['nuked', 'wildfire', 'lessgoo', 'massive', 'absurd'] },
+    { max: Infinity, words: ['shattered', 'legend', 'godmode', 'cinema'] },
+  ];
+
+  /** Random word for a burn of `delta` percentage points. `rng` returns [0, 1). */
+  function pickBurnWord(delta, rng = Math.random) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    const tier = BURN_WORDS.find((t) => d <= t.max) || BURN_WORDS[BURN_WORDS.length - 1];
+    const i = Math.min(tier.words.length - 1, Math.max(0, Math.floor(rng() * tier.words.length)));
+    return tier.words[i];
+  }
+
   const api = {
     parseUsage,
     primaryWindow,
@@ -203,6 +224,8 @@
     pickWeekly,
     shortLabel,
     sessionDelta,
+    pickBurnWord,
+    BURN_WORDS,
     severity,
     formatCountdown,
     formatAgo,
