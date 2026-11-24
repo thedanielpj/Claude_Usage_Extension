@@ -284,6 +284,7 @@
   transition: opacity 260ms ease, transform 260ms ease;
 }
 .head { display: flex; align-items: center; gap: 8px; }
+.eta { font-size: 12px; } /* countdown a touch smaller than the label and percentage (14px) */
 .dot { width: 2px; height: 2px; flex: none; border-radius: 50%; background: var(--muted); }
 .pct, .val { font-weight: 500; color: var(--fg); }
 .val { display: inline-block; min-width: 42px; backface-visibility: hidden; }
@@ -432,7 +433,7 @@
   // session cell
   const labelEl = h('span', {}, 'session');
   const dotEl = h('i', { class: 'dot' });
-  const etaEl = h('span');
+  const etaEl = h('span', { class: 'eta' });
   const pctEl = h('span', { class: 'pct' });
   const fillEl = h('span', { class: 'fill' });
 
