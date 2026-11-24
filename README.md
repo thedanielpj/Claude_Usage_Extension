@@ -74,7 +74,7 @@ src/usage.js       pure parsing/formatting/delta helpers (unit-tested)
 src/content.js     the strip: UI (shadow DOM), fetching, flip, burn animation, drag
 src/flame.js       flame frames for the burn animation (generated vector paths)
 popup.html/css/js  toolbar popup (on/off switch + privacy link)
-fonts/             Inter (variable, latin subset), SIL Open Font License
+fonts/             Inter (variable, latin subset) and Bangers (burn word), both SIL Open Font License
 test/              node:test unit tests
 icons/             16/48/128 px icons
 ```
@@ -85,4 +85,4 @@ All styling is in the `CSS` string near the top of `src/content.js`. The palette
 
 ## Not affiliated with Anthropic
 
-This is an independent project. Inter is © The Inter Project Authors and used under the SIL Open Font License 1.1 (see `fonts/LICENSE.txt`).
+This is an independent project. Inter is © The Inter Project Authors and Bangers is © The Bangers Project Authors; both are used under the SIL Open Font License 1.1 (see `fonts/LICENSE.txt` and `fonts/Bangers-OFL.txt`).

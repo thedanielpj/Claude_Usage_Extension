@@ -224,10 +224,14 @@
   function injectFont() {
     try {
       const url = chrome.runtime.getURL('fonts/inter-latin-wght-normal.woff2');
+      const burnUrl = chrome.runtime.getURL('fonts/bangers-latin-400-normal.woff2');
       const style = document.createElement('style');
       style.textContent =
         '@font-face{font-family:"Cuo Inter";font-style:normal;font-weight:100 900;' +
-        `font-display:swap;src:url("${url}") format("woff2");}`;
+        `font-display:swap;src:url("${url}") format("woff2");}` +
+        // Bangers (SIL OFL) is only used for the burn word.
+        '@font-face{font-family:"Cuo Bangers";font-style:normal;font-weight:400;' +
+        `font-display:swap;src:url("${burnUrl}") format("woff2");}`;
       (document.head || document.documentElement).appendChild(style);
     } catch (e) {
       /* ignore */
@@ -324,7 +328,12 @@
   transition: color 300ms ease, text-shadow 300ms ease;
 }
 .session.burning .head > .dot { background: #fff1a8; box-shadow: none; }
-.session.burning .pct, .session.burning .head > span:first-child { font-weight: 600; }
+.session.burning .pct { font-weight: 600; }
+/* The fun word: Bangers (comic caps), falls back to Inter if the font can't load. */
+.session.burning .head > span:first-child {
+  font-family: "Cuo Bangers", "Cuo Inter", Inter, system-ui, sans-serif;
+  font-weight: 400; font-size: 18px; letter-spacing: 0.04em;
+}
 .session.burning.fading .head > span, .session.burning.fading .pct {
   color: var(--fg); text-shadow: none; transition: color 1500ms ease-in, text-shadow 1500ms ease-in;
 }
