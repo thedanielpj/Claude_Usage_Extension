@@ -22,11 +22,9 @@
       "matches": ["https://claude.ai/*"]
     }
   ],
-  "background": {
-    "service_worker": "src/background.js"
-  },
   "action": {
-    "default_title": "Show or hide the Claude usage overlay",
+    "default_title": "Usage Overlay for Claude",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"

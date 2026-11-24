@@ -1,0 +1,18 @@
+:root { color-scheme: light dark; --bg:#fff; --fg:#1f1f1f; --muted:#6b6b6b; --line:#e6e6e6; --off:#c8c8c8; --on:#1f1f1f; --knob:#fff; }
+@media (prefers-color-scheme: dark) { :root { --bg:#191919; --fg:#efefef; --muted:#9a9a9a; --line:#2c2c2c; --off:#454545; --on:#efefef; --knob:#191919; } }
+* { box-sizing: border-box; }
+body { margin:0; width:220px; background:var(--bg); color:var(--fg); font:13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { padding:14px 14px 12px; }
+.row { display:flex; align-items:center; justify-content:space-between; cursor:pointer; }
+.name { font-weight:500; }
+.switch { position:relative; width:34px; height:20px; flex:none; }
+.switch input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer; }
+.track { position:absolute; inset:0; border-radius:10px; background:var(--off); transition:background .15s; }
+.track::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--knob); transition:transform .15s; }
+input:checked + .track { background:var(--on); }
+input:checked + .track::after { transform:translateX(14px); }
+input:focus-visible + .track { outline:2px solid #4c8bf5; outline-offset:2px; }
+footer { border-top:1px solid var(--line); padding:6px 14px; text-align:center; }
+footer a { font-size:11px; color:var(--muted); text-decoration:none; }
+footer a:hover, footer a:focus-visible { text-decoration:underline; }
+@media (prefers-reduced-motion: reduce) { .track, .track::after { transition:none; } }

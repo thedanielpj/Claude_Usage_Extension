@@ -13,7 +13,7 @@ A small Chrome extension that docks a flat usage strip to the top of [claude.ai]
 - **Weekly cell:** the weekly percentage. Every 30 seconds it flips to the time left (`3d 4h`), holds for about 6 seconds, and flips back.
 - **Fire animation:** when you finish a prompt and session usage jumps (say 10% to 15%), the session cell lights up with flames and shows `+5%` for 5 seconds, then settles back to normal.
 - **Details:** click the strip to drop down every limit (per-model weekly caps, extra usage) with reset times.
-- Click the toolbar icon to hide or show the strip.
+- Click the toolbar icon and use the switch to hide or show the strip.
 - No account, no API key, no analytics, no remote servers.
 
 Works in Chrome and Edge (and other Chromium browsers).
@@ -72,7 +72,7 @@ npm test        # unit tests for parsing, formatting and the +N% logic (Node 20+
 manifest.json      MV3 manifest
 src/usage.js       pure parsing/formatting/delta helpers (unit-tested)
 src/content.js     the strip: UI (shadow DOM), fetching, flip, fire animation, drag
-src/background.js  toolbar icon toggles the overlay
+popup.html/css/js  toolbar popup (on/off switch + privacy link)
 fonts/             Inter (variable, latin subset), SIL Open Font License
 test/              node:test unit tests
 icons/             16/48/128 px icons
