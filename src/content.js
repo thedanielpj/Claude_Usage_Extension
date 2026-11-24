@@ -325,8 +325,6 @@
 }
 .session.burning .head > .dot { background: #fff1a8; box-shadow: none; }
 .session.burning .pct, .session.burning .head > span:first-child { font-weight: 600; }
-.session.burning .face { gap: 10px; } /* longest words (e.g. "shattered") must not widen the cell */
-.session.burning .head { gap: 6px; }
 .session.burning.fading .head > span, .session.burning.fading .pct {
   color: var(--fg); text-shadow: none; transition: color 1500ms ease-in, text-shadow 1500ms ease-in;
 }
@@ -519,6 +517,8 @@
       labelEl.textContent = state.burn.word;
       pctEl.textContent = `+${state.burn.delta}%`;
     }
+    // During a burn only the word and +N% show; the countdown comes back afterwards.
+    if (burning) etaEl.hidden = dotEl.hidden = true;
     setThrust(burning);
   }
 
