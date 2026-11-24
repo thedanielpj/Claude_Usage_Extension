@@ -6,7 +6,7 @@
  *   [ session · 2h 13m  43% ][ weekly 15% ]
  *     └ gradient progress line along the bottom edge
  *
- *  - weekly flips between its percentage and time-left every ~30s
+ *  - the weekly label flips to time-left (the percentage stays put) every ~30s
  *  - when a prompt finishes and session usage jumps (10% -> 15%), the session
  *    cell lights up with a fire animation and shows "+5%" for a few seconds
  *
@@ -28,7 +28,7 @@
       refreshMs: 30 * 1000, // poll interval while the tab is visible
       minGapMs: 10 * 1000, // never poll (unforced) more often than this
       tickMs: 15 * 1000, // re-render countdowns
-      flipEveryMs: 30 * 1000, // weekly: how often to flip to time-left
+      flipEveryMs: 30 * 1000, // weekly: how often the label flips to time-left
       flipHoldMs: 6 * 1000, // weekly: how long time-left stays up
       burnHoldMs: 5 * 1000, // flame + word hold
       burnFadeMs: 1600, // slow die-out after the hold
@@ -150,7 +150,7 @@
     fetching: false,
     open: false,
     hidden: false,
-    weeklyFace: 'pct', // pct | time
+    weeklyFace: 'pct', // pct (label shows "weekly") | time (label shows time left)
     flipping: false,
     burn: null, // { delta, word, fading, timer, fadeTimer }
   };
@@ -287,7 +287,10 @@
 .eta { font-size: 12px; } /* countdown a touch smaller than the label and percentage (14px) */
 .dot { width: 2px; height: 2px; flex: none; border-radius: 50%; background: var(--muted); }
 .pct, .val { font-weight: 500; color: var(--fg); }
-.val { display: inline-block; min-width: 42px; backface-visibility: hidden; }
+.val { display: inline-block; min-width: 42px; }
+/* weekly label: flips to the time left. Fixed slot so the cell doesn't jump between the two. */
+.wl { display: inline-block; min-width: 52px; text-align: right; backface-visibility: hidden; }
+.wl.time { font-size: 12px; }
 .flip { display: inline-block; perspective: 240px; }
 
 /* ---------- progress line (session utilisation) ---------- */
@@ -445,10 +448,10 @@
     h('span', { class: 'line' }, fillEl));
 
   // weekly cell
-  const wLabelEl = h('span', {}, 'weekly');
+  const wLabelEl = h('span', { class: 'wl' }, 'weekly');
   const valEl = h('span', { class: 'val' });
   const weeklyBtn = h('button', { class: 'cell weekly', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', hidden: true },
-    wLabelEl, h('span', { class: 'flip' }, valEl));
+    h('span', { class: 'flip' }, wLabelEl), valEl);
 
   // dropdown
   const bodyEl = h('div');
@@ -474,6 +477,7 @@
 
   // ----------------------------------------------------------------- render
 
+  /** Weekly label: "weekly", or the time left while it is flipped. */
   function weeklyText() {
     const w = weeklyWindow();
     if (!w) return '';
@@ -481,7 +485,12 @@
       const ms = w.resetsAt.getTime() - Date.now();
       return ms > 0 ? U.formatCountdown(ms) : '…';
     }
-    return `${Math.round(w.pct)}%`;
+    return 'weekly';
+  }
+
+  function setWeeklyLabel(text) {
+    wLabelEl.textContent = text;
+    wLabelEl.classList.toggle('time', text !== 'weekly');
   }
 
   const sessionWindow = () => U.pickSession(state.parsed.windows);
@@ -521,7 +530,8 @@
     weeklyBtn.hidden = !w;
     if (w) {
       if (!w.resetsAt && state.weeklyFace === 'time') state.weeklyFace = 'pct';
-      if (!state.flipping) valEl.textContent = weeklyText();
+      valEl.textContent = `${Math.round(w.pct)}%`;
+      if (!state.flipping) setWeeklyLabel(weeklyText());
       const reset = w.resetsAt ? `, resets in ${U.formatCountdown(w.resetsAt.getTime() - now)}` : '';
       weeklyBtn.setAttribute('aria-label', `weekly usage ${Math.round(w.pct)}%${reset}. Show details.`);
     }
@@ -655,9 +665,9 @@
 
   // ------------------------------------------------------------- weekly flip
 
-  function flipValue(text) {
-    if (reducedMotion || typeof valEl.animate !== 'function') {
-      valEl.textContent = text;
+  function flipLabel(text) {
+    if (reducedMotion || typeof wLabelEl.animate !== 'function') {
+      setWeeklyLabel(text);
       return;
     }
     state.flipping = true;
@@ -671,19 +681,19 @@
       clearTimeout(safety);
       anims.forEach((a) => { try { a.cancel(); } catch (e) { /* ignore */ } });
       state.flipping = false;
-      valEl.textContent = weeklyText();
+      setWeeklyLabel(weeklyText());
     };
     const safety = setTimeout(finish, 800);
 
-    const out = valEl.animate(
+    const out = wLabelEl.animate(
       [{ transform: 'rotateX(0deg)', opacity: 1 }, { transform: 'rotateX(-90deg)', opacity: 0 }],
       { duration: 140, easing: 'ease-in', fill: 'forwards' });
     anims.push(out);
     out.onfinish = () => {
       if (done) return;
-      valEl.textContent = text;
+      setWeeklyLabel(text);
       out.cancel();
-      const back = valEl.animate(
+      const back = wLabelEl.animate(
         [{ transform: 'rotateX(90deg)', opacity: 0 }, { transform: 'rotateX(0deg)', opacity: 1 }],
         { duration: 180, easing: 'ease-out' });
       anims.push(back);
@@ -693,7 +703,7 @@
 
   function setWeeklyFace(face) {
     state.weeklyFace = face;
-    flipValue(weeklyText());
+    flipLabel(weeklyText());
   }
 
   let flipTimer = null;
