@@ -603,14 +603,14 @@
     }
   }
 
-  function burn(delta) {
+  function burn(delta, opts = {}) {
     // A burn that arrives while the previous one is dying out starts a fresh burst.
-    const fresh = !state.burn || state.burn.fading;
+    const fresh = opts.fresh || !state.burn || state.burn.fading;
     const total = (fresh ? 0 : state.burn.delta) + delta;
     if (state.burn) { clearTimeout(state.burn.timer); clearTimeout(state.burn.fadeTimer); }
     state.burn = {
       delta: total,
-      word: U.pickBurnWord(total),
+      word: opts.word || U.pickBurnWord(total),
       fading: false,
       timer: setTimeout(fadeBurn, CFG.burnHoldMs),
       fadeTimer: 0,
@@ -912,6 +912,11 @@
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
+      // TEMP-TEST: the popup's test panel asks for a burn. Remove with popup-test.js.
+      if (area === 'local' && changes.cuo_test_burn && changes.cuo_test_burn.newValue) {
+        const t = changes.cuo_test_burn.newValue;
+        if (!state.hidden && state.status === 'ok' && t.delta > 0) burn(t.delta, { fresh: true, word: t.word });
+      }
       if (area !== 'local' || !changes[KEY_HIDDEN]) return;
       state.hidden = !!changes[KEY_HIDDEN].newValue;
       if (state.hidden) setOpen(false);

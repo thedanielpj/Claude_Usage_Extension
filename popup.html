@@ -15,9 +15,20 @@
       </span>
     </label>
   </main>
+  <!-- TEMP-TEST: remove this block, popup-test.js and the two script tags before release -->
+  <section class="test">
+    <div class="test-title">Test burn animation</div>
+    <div id="t-tiers" class="tiers"></div>
+    <div class="pick">
+      <select id="t-word" aria-label="Word"></select>
+      <button id="t-play" type="button">Play</button>
+    </div>
+  </section>
   <footer>
     <a id="privacy" href="https://github.com/thedanielpj/Claude_Usage_Extension/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy details</a>
   </footer>
+  <script src="src/usage.js"></script> <!-- TEMP-TEST -->
   <script src="popup.js"></script>
+  <script src="popup-test.js"></script> <!-- TEMP-TEST -->
 </body>
 </html>
