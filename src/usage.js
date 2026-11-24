@@ -207,6 +207,13 @@
     { max: Infinity, words: ['shattered', 'legend', 'godmode', 'cinema'] },
   ];
 
+  /** How hard the burn should hit, 0 (tier 1, +1%) to 1 (top tier, 41%+), stepped by tier. */
+  function burnPower(delta) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    const i = BURN_WORDS.findIndex((t) => d <= t.max);
+    return (i < 0 ? BURN_WORDS.length - 1 : i) / (BURN_WORDS.length - 1);
+  }
+
   /** Random word for a burn of `delta` percentage points. `rng` returns [0, 1). */
   function pickBurnWord(delta, rng = Math.random) {
     const d = Number.isFinite(delta) ? delta : 0;
@@ -225,6 +232,7 @@
     shortLabel,
     sessionDelta,
     pickBurnWord,
+    burnPower,
     BURN_WORDS,
     severity,
     formatCountdown,

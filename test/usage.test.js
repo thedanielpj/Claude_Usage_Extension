@@ -238,3 +238,14 @@ test('burn word falls back to the smallest tier for odd input', () => {
     assert.ok(U.BURN_WORDS[0].words.includes(U.pickBurnWord(bad)));
   }
 });
+
+test('burn power steps up with the tier', () => {
+  assert.equal(U.burnPower(1), 0);
+  assert.equal(U.burnPower(2), 0.25);
+  assert.equal(U.burnPower(7), 0.25);
+  assert.equal(U.burnPower(8), 0.5);
+  assert.equal(U.burnPower(16), 0.75);
+  assert.equal(U.burnPower(41), 1);
+  assert.equal(U.burnPower(500), 1);
+  assert.equal(U.burnPower(NaN), 0);
+});

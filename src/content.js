@@ -301,20 +301,26 @@
 /* Orange tint + a jet-thrust flame fill the session cell. The fun word and +N% take the
    label/percentage slots and glow light yellow on top of it. */
 .fx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+/* --p (0..1) is the burn's power, set from the size of the jump: bigger jump = bigger,
+   faster, hotter flame (see burnPower in usage.js). */
+.session { --p: 0; }
 .tint {
   position: absolute; inset: 0; opacity: 0;
-  background: linear-gradient(270deg, rgba(255, 90, 10, 0.34), rgba(255, 130, 20, 0.12) 70%, rgba(255, 130, 20, 0.05));
+  background: linear-gradient(270deg,
+    rgba(255, 90, 10, calc(0.26 + 0.2 * var(--p))),
+    rgba(255, 130, 20, calc(0.09 + 0.12 * var(--p))) 70%,
+    rgba(255, 130, 20, calc(0.04 + 0.08 * var(--p))));
   transition: opacity 400ms ease;
 }
-.session.burning .tint { opacity: 1; animation: cuo-tint 260ms steps(1, end) infinite; }
+.session.burning .tint { opacity: 1; animation: cuo-tint calc(300ms - 160ms * var(--p)) steps(1, end) infinite; }
 .session.burning.fading .tint { opacity: 0; animation: none; transition: opacity 1500ms ease-in; }
 .thrust {
-  position: absolute; right: -3%; top: -16%; width: 128%; height: 132%;
+  position: absolute; right: -3%; top: calc(-6% - 20% * var(--p)); width: calc(100% + 40% * var(--p)); height: calc(112% + 40% * var(--p));
   transform-origin: 100% 50%; transform: translateX(100%); opacity: 0;
 }
 .session.burning .thrust {
   opacity: 1; transform: none;
-  transition: transform 190ms cubic-bezier(0.05, 0.9, 0.2, 1), opacity 60ms linear;
+  transition: transform calc(230ms - 120ms * var(--p)) cubic-bezier(0.05, 0.9, 0.2, 1), opacity 60ms linear;
 }
 .session.burning.fading .thrust {
   opacity: 0; transform: translateX(30%) scaleX(0.7);
@@ -324,7 +330,7 @@
 .thrust g.f.on { display: inline; }
 .session.burning .head > span, .session.burning .head > .dot, .session.burning .pct {
   color: #fff1a8;
-  text-shadow: 0 0 8px rgba(255, 214, 102, 0.5), 0 0 2px rgba(70, 15, 0, 0.85), 0 1px 1px rgba(70, 15, 0, 0.8);
+  text-shadow: 0 0 calc(6px + 8px * var(--p)) rgba(255, 214, 102, calc(0.4 + 0.4 * var(--p))), 0 0 2px rgba(70, 15, 0, 0.85), 0 1px 1px rgba(70, 15, 0, 0.8);
   transition: color 300ms ease, text-shadow 300ms ease;
 }
 .session.burning .head > .dot { background: #fff1a8; box-shadow: none; }
@@ -523,12 +529,13 @@
     sessionBtn.classList.toggle('burning', burning);
     sessionBtn.classList.toggle('fading', burning && state.burn.fading);
     if (burning) {
+      sessionBtn.style.setProperty('--p', String(U.burnPower(state.burn.delta)));
       labelEl.textContent = state.burn.word;
       pctEl.textContent = `+${state.burn.delta}%`;
     }
     // During a burn only the word and +N% show; the countdown comes back afterwards.
     if (burning) etaEl.hidden = dotEl.hidden = true;
-    setThrust(burning);
+    setThrust(burning, burning ? U.burnPower(state.burn.delta) : 0);
   }
 
   function barRow(win, now) {
@@ -589,13 +596,18 @@
   }
 
   let thrustTimer = 0;
+  let thrustMs = 0;
   let frameIdx = 0;
   function showFrame(i) {
     flameFrames.forEach((g, n) => g.classList.toggle('on', n === i));
   }
   /** Runs the frame loop only while the burn is on screen; static frame under reduced motion. */
-  function setThrust(on) {
+  function setThrust(on, power = 0) {
+    // Bigger burns flicker faster; restart the loop if the power changed (stacked burns).
+    const ms = Math.round(CFG.flameFrameMs - 30 * power);
+    if (on && thrustTimer > 0 && ms !== thrustMs) setThrust(false);
     if (on && !thrustTimer) {
+      thrustMs = ms;
       if (reducedMotion) {
         showFrame(4);
         thrustTimer = -1;
@@ -604,7 +616,7 @@
         thrustTimer = setInterval(() => {
           frameIdx = (frameIdx + 1) % flameFrames.length;
           showFrame(frameIdx);
-        }, CFG.flameFrameMs);
+        }, ms);
       }
     } else if (!on && thrustTimer) {
       if (thrustTimer > 0) clearInterval(thrustTimer);
