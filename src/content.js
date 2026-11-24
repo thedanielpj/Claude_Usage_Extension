@@ -912,7 +912,7 @@
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
-      // TEMP-TEST: the popup's test panel asks for a burn. Remove with popup-test.js.
+      // TEMP-TEST: the popup's test panel asks for a burn. Remove with popup-testpanel.js.
       if (area === 'local' && changes.cuo_test_burn && changes.cuo_test_burn.newValue) {
         const t = changes.cuo_test_burn.newValue;
         if (!state.hidden && state.status === 'ok' && t.delta > 0) burn(t.delta, { fresh: true, word: t.word });
