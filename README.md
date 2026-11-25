@@ -12,6 +12,8 @@ A small Chrome extension that docks a flat usage strip to the top of [claude.ai]
 - **Session cell:** label, time until the 5-hour window resets, and the percentage used. The gradient progress fill sits on the page's own header separator line, with exactly the same thickness, so it reads as part of that line.
 - **Weekly cell:** the weekly percentage. Every 30 seconds it flips to the time left (`3d 4h`), holds for about 6 seconds, and flips back.
 - **Burn animation:** when you finish a prompt and session usage jumps (say 10% to 15%), a jet-thrust flame shoots across the session cell from right to left. A fun word replaces `session` and `+5%` replaces the percentage for about 5 seconds, then the flame slowly dies out and the cell settles back to normal. With reduced motion on, you get a still flame instead.
+- **Near the limit:** at 80% / 90% / 95% the progress line heats up (hot, red-orange, slow red pulse) and a warning word (`running hot`, `redline`, `last drop`) shows for a few seconds now and then. From 90% a soft northern-lights glow drifts along the bottom of the strip, warming from amber to red as you approach 100%, and burns turn the flame red. The weekly cell gets its own line once it passes 80%.
+- **Limit hit:** the cell goes burnt out (charred, faint smouldering embers) and shows `back in 1h 12m` for the session, or `back Thu 9 AM` for the weekly limit (the session cell then reads `on hold`). When the limit resets, a short `reloaded` moment plays.
 - **Details:** click the strip to drop down every limit (per-model weekly caps, extra usage) with reset times.
 - Click the toolbar icon and use the switch to hide or show the strip.
 - No account, no API key, no analytics, no remote servers.

@@ -30,6 +30,10 @@
       tickMs: 15 * 1000, // re-render countdowns
       flipEveryMs: 30 * 1000, // weekly: how often the label flips to time-left
       flipHoldMs: 6 * 1000, // weekly: how long time-left stays up
+      warnEveryMs: 45 * 1000, // near the limit: how often the warning word shows
+      warnHoldMs: 3500, // ...and for how long
+      warnFirstMs: 1200, // first warning shortly after crossing a threshold
+      relitMs: 3000, // "reloaded" moment after a hit limit resets
       burnHoldMs: 5 * 1000, // flame + word hold
       burnFadeMs: 1600, // slow die-out after the hold
       flameFrameMs: 70, // flame frame step (~14 fps)
@@ -151,8 +155,13 @@
     open: false,
     hidden: false,
     weeklyFace: 'pct', // pct (label shows "weekly") | time (label shows time left)
+    weeklyView: 0, // 0 normal | 1-3 warning word | 'out' | 'relit'
     flipping: false,
     burn: null, // { delta, word, fading, timer, fadeTimer }
+    warn: { session: { level: 0, until: 0, next: 0 }, weekly: { level: 0, until: 0, next: 0 } },
+    lastOut: { session: null, weekly: null }, // for the "reloaded" moment
+    relitUntil: { session: 0, weekly: 0 },
+    test: null, // TEMP-TEST: { session, weekly } usage overrides from the popup
   };
 
   const snapshotOf = (parsed) => {
@@ -277,6 +286,7 @@
 /* If the page's separator can't be found, draw our own 1px bottom edge instead. */
 .root.fallback .cell { height: var(--h); border-bottom-width: var(--bw); }
 .weekly { display: flex; align-items: center; gap: 16px; }
+.weekly > .flip, .weekly > .val { position: relative; z-index: 1; }
 
 .face {
   grid-area: 1 / 1; z-index: 1;
@@ -350,6 +360,88 @@
 .session.burning.fading .head > span { color: var(--muted); }
 @keyframes cuo-tint { 0% { opacity: 1; } 35% { opacity: 0.72; } 60% { opacity: 0.9; } 80% { opacity: 0.6; } }
 
+
+/* ---------- heat: nearing the limit ---------- */
+/* Progress line heats up: 80% hot, 90% red-orange, 95% red with a slow pulse.
+   Weekly only shows its line once it is heating up. */
+.weekly .line { opacity: 0; transition: opacity 600ms ease; }
+.weekly.heat-1 .line, .weekly.heat-2 .line, .weekly.heat-3 .line, .weekly.out .line { opacity: 1; }
+.heat-1 .fill { background: linear-gradient(90deg, #ff7a00, #ffae1a); box-shadow: 0 0 4px rgba(255, 150, 20, 0.55); }
+.heat-2 .fill { background: linear-gradient(90deg, #ff4a10, #ff7a1a); box-shadow: 0 0 5px rgba(255, 80, 20, 0.6); }
+.heat-3 .fill { background: linear-gradient(90deg, #f02a1a, #ff5a2a); box-shadow: 0 0 6px rgba(240, 50, 30, 0.7);
+  animation: cuo-pulse 2400ms ease-in-out infinite; }
+@keyframes cuo-pulse { 50% { opacity: 0.5; } }
+
+/* Warning word ("running hot" / "redline" / "last drop"), shown for a few seconds now and then. */
+.warn-1 { color: #e9a85a !important; }
+.warn-2 { color: #f08a5e !important; }
+.warn-3 { color: #f07060 !important; }
+.weekly.heat-1 .wl, .weekly.heat-2 .wl, .weekly.heat-3 .wl { min-width: 72px; } /* room for the word, no jump */
+
+/* Northern-lights glow from 90% to the limit: soft blurred light drifting along the bottom
+   half of the strip, amber at 90% warming to a gentle red at 100%. --q = 0..1, --heat = r,g,b */
+.root { --q: 0; --heat: 255, 160, 40; }
+.aurora {
+  position: absolute; left: -30%; right: -30%; bottom: -35%; height: 90%;
+  opacity: 0; filter: blur(9px); transition: opacity 1400ms ease;
+}
+.root.aurora-on .cell:not(.out):not(.burning) .aurora { opacity: calc(0.6 + 0.4 * var(--q)); }
+.aurora i {
+  position: absolute; bottom: 0; width: 55%; height: 100%; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 100%, rgba(var(--heat), calc(0.30 + 0.16 * var(--q))), rgba(var(--heat), 0) 70%);
+}
+.aurora i:nth-child(1) { left: 0; animation: cuo-aur-a 13s ease-in-out infinite alternate; }
+.aurora i:nth-child(2) { left: 25%; animation: cuo-aur-b 17s ease-in-out infinite alternate; opacity: 0.8; }
+.aurora i:nth-child(3) { left: 48%; animation: cuo-aur-c 11s ease-in-out infinite alternate; opacity: 0.9; }
+@keyframes cuo-aur-a { 0% { transform: translateX(-10%) scaleY(0.75); } 50% { transform: translateX(25%) scaleY(1.05); } 100% { transform: translateX(45%) scaleY(0.85); } }
+@keyframes cuo-aur-b { 0% { transform: translateX(20%) scaleY(1); } 50% { transform: translateX(-20%) scaleY(0.7); } 100% { transform: translateX(10%) scaleY(1.1); } }
+@keyframes cuo-aur-c { 0% { transform: translateX(10%) scaleY(0.9); } 50% { transform: translateX(-30%) scaleY(1.15); } 100% { transform: translateX(-5%) scaleY(0.8); } }
+
+/* Burn tie-in: at 90%+ the flame burns red. */
+.session.hot .thrust g.f { fill: url(#cuo-thrust-red); }
+.session.hot .tint {
+  background: linear-gradient(270deg, rgba(225, 40, 20, calc(0.28 + 0.2 * var(--p))),
+    rgba(230, 60, 30, calc(0.1 + 0.12 * var(--p))) 70%, rgba(230, 60, 30, calc(0.05 + 0.08 * var(--p))));
+}
+
+/* ---------- burnt out: the limit is hit ---------- */
+/* Charred cell, ash-grey text, a faint ember smoulder along the bottom, line burnt full. */
+.cell.out { background: #110d0c; }
+.char { position: absolute; inset: 0; opacity: 0; transition: opacity 1200ms ease; }
+.cell.out .char { opacity: 1; }
+.char::before {
+  content: ''; position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 70% at 50% 135%, rgba(150, 40, 12, 0.32), rgba(150, 40, 12, 0) 70%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 40%, rgba(60, 18, 8, 0.25));
+  animation: cuo-smoulder 5200ms ease-in-out infinite;
+}
+.char i {
+  position: absolute; bottom: 3px; width: 2px; height: 2px; border-radius: 50%;
+  background: #ff7a3a; box-shadow: 0 0 4px 1px rgba(255, 100, 40, 0.7); opacity: 0;
+  animation: cuo-ember-glow 4200ms ease-in-out infinite;
+}
+.char i:nth-child(1) { left: 18%; animation-delay: 0s; }
+.char i:nth-child(2) { left: 52%; bottom: 5px; animation-delay: 1.6s; animation-duration: 5000ms; }
+.char i:nth-child(3) { left: 81%; animation-delay: 2.9s; animation-duration: 3800ms; }
+@keyframes cuo-smoulder { 50% { opacity: 0.55; } }
+@keyframes cuo-ember-glow { 0%, 100% { opacity: 0; } 45% { opacity: 0.85; } 70% { opacity: 0.3; } }
+.cell.out .head > span, .cell.out .wl { color: #857a74; }
+.cell.out .pct, .cell.out .val { color: #c88a6c; }
+.cell.out .dot { background: #5e5450; }
+.cell.out .fill { width: 100% !important; background: linear-gradient(90deg, #4a150a, #8a2a12); box-shadow: 0 0 4px rgba(140, 40, 15, 0.6); }
+
+/* ---------- reloaded: a hit limit just reset ---------- */
+.glint { position: absolute; inset: 0; opacity: 0; }
+.cell.relit .glint {
+  background: linear-gradient(100deg, rgba(255, 230, 170, 0) 30%, rgba(255, 230, 170, 0.16) 50%, rgba(255, 230, 170, 0) 70%);
+  background-size: 250% 100%; animation: cuo-glint 1300ms ease-out 1 forwards;
+}
+.cell.relit .head > span:first-child, .cell.relit .wl { color: #f3dca0; }
+.cell.relit .fill { animation: cuo-refill 900ms cubic-bezier(0.2, 0.7, 0.2, 1) 1; transform-origin: 0 50%; }
+@keyframes cuo-glint { 0% { opacity: 1; background-position: 100% 0; } 100% { opacity: 1; background-position: 0 0; } }
+@keyframes cuo-refill { from { transform: scaleX(0); } }
+
 /* ---------- details dropdown ---------- */
 .panel {
   position: absolute; top: 100%; width: ${PANEL_W}px; z-index: 5;
@@ -393,8 +485,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .face, .fill, .bar > span, .tint, .thrust, .session * { transition: none !important; }
+  .face, .fill, .bar > span, .tint, .thrust, .session *, .weekly *, .aurora, .char { transition: none !important; }
   .session.burning .tint { animation: none; opacity: 0.85; }
+  .aurora i, .char::before, .heat-3 .fill, .cell.relit .glint, .cell.relit .fill { animation: none !important; }
+  .char i { animation: none; opacity: 0.5; }
 }
 `;
 
@@ -419,6 +513,11 @@
     [['0', '#b82a07', '1'], ['0.4', '#cc380a', '0.95'], ['1', '#ec6218', '0.5']].forEach(([o, c, a]) =>
       grad.appendChild(svgEl('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
     defs.appendChild(grad);
+    // Red version for burns at 90%+ (the nozzle stays dark so the number stays readable).
+    const red = svgEl('linearGradient', { id: 'cuo-thrust-red', gradientUnits: 'userSpaceOnUse', x1: FLAME.w, y1: 0, x2: 0, y2: 0 });
+    [['0', '#9e1408', '1'], ['0.4', '#c01f0c', '0.95'], ['1', '#e04424', '0.5']].forEach(([o, c, a]) =>
+      red.appendChild(svgEl('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
+    defs.appendChild(red);
     svg.appendChild(defs);
     FLAME.frames.forEach((paths) => {
       const g = svgEl('g', { class: 'f', fill: 'url(#cuo-thrust)' });
@@ -438,10 +537,13 @@
   const dotEl = h('i', { class: 'dot' });
   const etaEl = h('span', { class: 'eta' });
   const pctEl = h('span', { class: 'pct' });
+  const auroraEl = () => h('span', { class: 'aurora' }, h('i'), h('i'), h('i'));
+  const charEl = () => h('span', { class: 'char' }, h('i'), h('i'), h('i'));
   const fillEl = h('span', { class: 'fill' });
 
   const sessionBtn = h('button', { class: 'cell session', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false' },
-    h('span', { class: 'fx', 'aria-hidden': 'true' }, h('span', { class: 'tint' }), buildThrust()),
+    h('span', { class: 'fx', 'aria-hidden': 'true' }, auroraEl(), charEl(), h('span', { class: 'glint' }),
+      h('span', { class: 'tint' }), buildThrust()),
     h('span', { class: 'face normal' },
       h('span', { class: 'head' }, labelEl, dotEl, etaEl),
       pctEl),
@@ -450,8 +552,11 @@
   // weekly cell
   const wLabelEl = h('span', { class: 'wl' }, 'weekly');
   const valEl = h('span', { class: 'val' });
+  const wFillEl = h('span', { class: 'fill' });
   const weeklyBtn = h('button', { class: 'cell weekly', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', hidden: true },
-    h('span', { class: 'flip' }, wLabelEl), valEl);
+    h('span', { class: 'fx', 'aria-hidden': 'true' }, auroraEl(), charEl(), h('span', { class: 'glint' })),
+    h('span', { class: 'flip' }, wLabelEl), valEl,
+    h('span', { class: 'line' }, wFillEl));
 
   // dropdown
   const bodyEl = h('div');
@@ -481,6 +586,9 @@
   function weeklyText() {
     const w = weeklyWindow();
     if (!w) return '';
+    if (state.weeklyView === 'out') return w.resetsAt ? `back ${U.formatResetAt(w.resetsAt)}` : 'maxed';
+    if (state.weeklyView === 'relit') return 'reloaded';
+    if (state.weeklyView > 0) return U.WARN_WORDS[state.weeklyView];
     if (state.weeklyFace === 'time' && w.resetsAt) {
       const ms = w.resetsAt.getTime() - Date.now();
       return ms > 0 ? U.formatCountdown(ms) : '…';
@@ -490,11 +598,63 @@
 
   function setWeeklyLabel(text) {
     wLabelEl.textContent = text;
-    wLabelEl.classList.toggle('time', text !== 'weekly');
+    const v = state.weeklyView;
+    wLabelEl.classList.toggle('time', text !== 'weekly' && !(v > 0) && v !== 'relit');
+    setWarnClass(wLabelEl, typeof v === 'number' && text === U.WARN_WORDS[v] ? v : 0);
   }
 
-  const sessionWindow = () => U.pickSession(state.parsed.windows);
-  const weeklyWindow = () => U.pickWeekly(state.parsed.windows, sessionWindow());
+  // TEMP-TEST: the popup can override the percentages to preview each state.
+  const withTest = (w, key) => (w && state.test && state.test[key] != null ? Object.assign({}, w, { pct: state.test[key] }) : w);
+  const rawSession = () => U.pickSession(state.parsed.windows);
+  const sessionWindow = () => withTest(rawSession(), 'session');
+  const weeklyWindow = () => withTest(U.pickWeekly(state.parsed.windows, rawSession()), 'weekly');
+
+  /** Warning word schedule for one cell: shows for a few seconds now and then while heating up. */
+  function warnFor(key, level, now) {
+    const w = state.warn[key];
+    if (level < 1 || level > 3) {
+      w.level = 0; w.until = 0;
+      return 0;
+    }
+    if (level > w.level) w.next = now + CFG.warnFirstMs; // crossed a threshold: say so soon
+    w.level = level;
+    if (now >= w.next) {
+      w.until = now + CFG.warnHoldMs;
+      w.next = now + CFG.warnEveryMs;
+      schedule(CFG.warnHoldMs + 50);
+    }
+    if (now < w.until) return level;
+    schedule(w.next - now + 20);
+    return 0;
+  }
+
+  /** "Reloaded" moment: a limit that was hit has reset. */
+  function relitFor(key, out, now) {
+    if (state.lastOut[key] === true && !out) {
+      state.relitUntil[key] = now + CFG.relitMs;
+      schedule(CFG.relitMs + 50);
+    }
+    state.lastOut[key] = out;
+    return now < state.relitUntil[key];
+  }
+
+  // One pending re-render for timed effects (warning words, reloaded); the regular tick is slow.
+  let fxTimer = 0;
+  let fxAt = Infinity;
+  function schedule(ms) {
+    const at = Date.now() + Math.max(0, ms);
+    if (fxTimer && at >= fxAt) return;
+    clearTimeout(fxTimer);
+    fxAt = at;
+    fxTimer = setTimeout(() => { fxTimer = 0; fxAt = Infinity; render(); }, Math.max(0, ms));
+  }
+
+  function setHeatClass(el, level) {
+    for (let i = 1; i <= 3; i++) el.classList.toggle(`heat-${i}`, level === i);
+  }
+  function setWarnClass(el, level) {
+    for (let i = 1; i <= 3; i++) el.classList.toggle(`warn-${i}`, level === i);
+  }
 
   function renderBusy() {
     refreshBtn.classList.toggle('spin', state.fetching);
@@ -503,16 +663,44 @@
   function renderStrip(now) {
     const s = state.status === 'ok' ? sessionWindow() : null;
 
+    const wRaw = s ? weeklyWindow() : null;
+    const weeklyOut = !!wRaw && U.heatLevel(wRaw.pct) === 4;
+    const burningNow = !!(state.burn && s);
+    let sessionOut = false;
+    let sLevel = 0;
+    let sWarn = 0;
+    let sRelit = false;
+
     if (s) {
       const pct = Math.round(s.pct);
       const ms = s.resetsAt ? s.resetsAt.getTime() - now : null;
       const eta = ms == null ? '' : ms > 0 ? U.formatCountdown(ms) : 'resetting';
-      labelEl.textContent = U.shortLabel(s);
-      etaEl.textContent = eta;
-      etaEl.hidden = dotEl.hidden = !eta;
+      sLevel = U.heatLevel(s.pct);
+      sessionOut = sLevel === 4;
+      // If the weekly limit is hit, that is what blocks you: session goes on hold, weekly shows when it's back.
+      const blocked = sessionOut || weeklyOut;
+      sRelit = relitFor('session', blocked, now);
+      sWarn = blocked || burningNow ? 0 : warnFor('session', sLevel, now);
+      let label = U.shortLabel(s);
+      let sub = eta;
+      if (weeklyOut) {
+        label = 'on hold'; sub = ''; // the weekly cell says when it's back
+      } else if (sessionOut) {
+        label = ms != null && ms > 0 ? 'back in' : 'resetting'; sub = ms != null && ms > 0 ? eta : '';
+      } else if (sRelit) {
+        label = 'reloaded'; sub = '';
+      } else if (sWarn) {
+        label = U.WARN_WORDS[sWarn]; sub = '';
+      }
+      labelEl.textContent = label;
+      setWarnClass(labelEl, sWarn);
+      etaEl.textContent = sub;
+      etaEl.hidden = dotEl.hidden = !sub;
       pctEl.textContent = `${pct}%`;
-      fillEl.style.width = `${s.pct}%`;
-      const aria = `${U.shortLabel(s)} usage ${pct}%` + (eta ? `, resets in ${eta}` : '') + '. Show details.';
+      fillEl.style.width = `${Math.min(100, s.pct)}%`;
+      const aria = `${U.shortLabel(s)} usage ${pct}%` + (sessionOut ? ', limit reached' : '')
+        + (weeklyOut && wRaw.resetsAt ? `, weekly limit reached, back ${U.formatResetAt(wRaw.resetsAt, now)}` : eta ? `, resets in ${eta}` : '')
+        + '. Show details.';
       sessionBtn.setAttribute('aria-label', aria);
       sessionBtn.title = '';
     } else {
@@ -520,28 +708,56 @@
       labelEl.textContent = loading ? 'session' : 'usage';
       etaEl.hidden = dotEl.hidden = true;
       pctEl.textContent = loading ? '…' : '–';
+      setWarnClass(labelEl, 0);
       fillEl.style.width = '0';
       const msg = loading ? 'Loading usage' : 'Usage unavailable';
       sessionBtn.setAttribute('aria-label', `${msg}. Show details.`);
       sessionBtn.title = msg;
     }
 
-    const w = s ? weeklyWindow() : null;
+    const w = wRaw;
     weeklyBtn.hidden = !w;
+    let wLevel = 0;
     if (w) {
       if (!w.resetsAt && state.weeklyFace === 'time') state.weeklyFace = 'pct';
+      wLevel = U.heatLevel(w.pct);
+      const wRelit = relitFor('weekly', wLevel === 4, now);
+      const wWarn = wLevel === 4 ? 0 : warnFor('weekly', wLevel, now);
+      const view = wLevel === 4 ? 'out' : wRelit ? 'relit' : wWarn || 0;
+      const changed = view !== state.weeklyView;
+      state.weeklyView = view;
       valEl.textContent = `${Math.round(w.pct)}%`;
-      if (!state.flipping) setWeeklyLabel(weeklyText());
+      wFillEl.style.width = `${Math.min(100, w.pct)}%`;
+      setHeatClass(weeklyBtn, wLevel);
+      weeklyBtn.classList.toggle('out', wLevel === 4);
+      weeklyBtn.classList.toggle('relit', wRelit);
+      if (changed && !state.flipping && view !== 'out') flipLabel(weeklyText());
+      else if (!state.flipping) setWeeklyLabel(weeklyText());
       const reset = w.resetsAt ? `, resets in ${U.formatCountdown(w.resetsAt.getTime() - now)}` : '';
       weeklyBtn.setAttribute('aria-label', `weekly usage ${Math.round(w.pct)}%${reset}. Show details.`);
     }
 
-    const burning = !!(state.burn && s);
+    const burning = burningNow;
+    setHeatClass(sessionBtn, burning ? 0 : sLevel);
+    sessionBtn.classList.toggle('out', !burning && (sessionOut || weeklyOut));
+    sessionBtn.classList.toggle('relit', !burning && sRelit);
+    sessionBtn.classList.toggle('hot', burning && s.pct >= 90);
+
+    // Northern-lights glow while either limit is 90-99%.
+    const near = [s, w].filter((x) => x && U.heatLevel(x.pct) < 4).map((x) => x.pct);
+    const q = near.length ? Math.max(...near.map(U.auroraStrength)) : 0;
+    const glowOn = near.some((p) => p >= 90);
+    rootEl.classList.toggle('aurora-on', glowOn);
+    if (glowOn) {
+      rootEl.style.setProperty('--q', q.toFixed(3));
+      rootEl.style.setProperty('--heat', U.heatRgb(q));
+    }
     sessionBtn.classList.toggle('burning', burning);
     sessionBtn.classList.toggle('fading', burning && state.burn.fading);
     if (burning) {
       sessionBtn.style.setProperty('--p', String(U.burnPower(state.burn.delta)));
       labelEl.textContent = state.burn.word;
+      setWarnClass(labelEl, 0);
       pctEl.textContent = `+${state.burn.delta}%`;
     }
     // During a burn only the word and +N% show; the countdown comes back afterwards.
@@ -711,7 +927,7 @@
     clearTimeout(flipTimer);
     flipTimer = setTimeout(() => {
       const w = weeklyWindow();
-      if (!state.hidden && document.visibilityState === 'visible' && w && w.resetsAt) {
+      if (!state.hidden && document.visibilityState === 'visible' && w && w.resetsAt && !state.weeklyView) {
         setWeeklyFace('time');
         flipTimer = setTimeout(() => {
           setWeeklyFace('pct');
@@ -988,6 +1204,10 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       // TEMP-TEST: the popup's test panel asks for a burn. Remove with popup-testpanel.js.
+      if (area === 'local' && changes.cuo_test_usage) {
+        state.test = changes.cuo_test_usage.newValue || null;
+        render();
+      }
       if (area === 'local' && changes.cuo_test_burn && changes.cuo_test_burn.newValue) {
         const t = changes.cuo_test_burn.newValue;
         if (!state.hidden && state.status === 'ok' && t.delta > 0) burn(t.delta, { fresh: true, word: t.word });
@@ -1025,8 +1245,9 @@
   }, CFG.finishCheckMs);
 
   (async function init() {
-    const saved = await store.get([KEY_HIDDEN]);
+    const saved = await store.get([KEY_HIDDEN, 'cuo_test_usage']);
     state.hidden = saved[KEY_HIDDEN] === true;
+    state.test = saved.cuo_test_usage || null; // TEMP-TEST
     injectFont();
     document.documentElement.appendChild(host);
     observe(document.documentElement);

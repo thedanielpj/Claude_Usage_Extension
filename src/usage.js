@@ -228,6 +228,46 @@
   }
 
   /**
+   * Heat level of a usage window: 0 below 80%, 1 at 80-89 ("running hot"), 2 at 90-94
+   * ("redline"), 3 at 95%+ ("last drop"), 4 once the limit is hit (99.5%+, "burnt out").
+   */
+  const HIT_PCT = 99.5;
+  function heatLevel(pct) {
+    if (!Number.isFinite(pct)) return 0;
+    if (pct >= HIT_PCT) return 4;
+    if (pct >= 95) return 3;
+    if (pct >= 90) return 2;
+    if (pct >= 80) return 1;
+    return 0;
+  }
+  const WARN_WORDS = ['', 'running hot', 'redline', 'last drop'];
+
+  /** 0..1 strength of the background glow: 0 below 90%, rising to 1 at 100%. */
+  function auroraStrength(pct) {
+    if (!Number.isFinite(pct) || pct < 90) return 0;
+    return Math.min(1, (pct - 90) / 10);
+  }
+
+  /** Glow colour for a strength 0..1: amber at 90%, through to a soft red at 100%. "r, g, b". */
+  function heatRgb(q) {
+    const t = Math.min(1, Math.max(0, q || 0));
+    const mix = (a, b) => Math.round(a + (b - a) * t);
+    return `${mix(255, 240)}, ${mix(160, 50)}, ${mix(40, 35)}`;
+  }
+
+  /**
+   * When a hit limit comes back, short: "9:40 PM" if that's within the next ~20h,
+   * otherwise "Thu 9 AM" (minutes dropped when they are :00).
+   */
+  function formatResetAt(date, now = Date.now(), locale) {
+    const opts = { hour: 'numeric' };
+    if (date.getMinutes() !== 0) opts.minute = '2-digit';
+    const soon = date.getTime() - now < 20 * 3600 * 1000;
+    if (!soon) opts.weekday = 'short';
+    return date.toLocaleTimeString(locale, opts);
+  }
+
+  /**
    * Fun word shown in place of the "session" label while the burn animation runs.
    * Picked at random from a pool chosen by how much was just used. Spelling is
    * intentional. Tiers: +1 | 2-7 | 8-15 | 16-40 | 41+.
@@ -266,6 +306,12 @@
     shortLabel,
     sessionDelta,
     pickBurnWord,
+    heatLevel,
+    HIT_PCT,
+    WARN_WORDS,
+    auroraStrength,
+    heatRgb,
+    formatResetAt,
     burnPower,
     BURN_WORDS,
     severity,

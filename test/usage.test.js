@@ -303,3 +303,32 @@ test('placeOverlay: ignores items far to the left or right of the strip', () => 
   const items = [{ l: 20, r: 200, ctl: true }, { l: 800, r: 980, ctl: true }];
   assert.equal(U.placeOverlay(items, 350, 300, 1000), 350);
 });
+
+test('heatLevel thresholds', () => {
+  const cases = [[0, 0], [79.9, 0], [80, 1], [89.9, 1], [90, 2], [94.9, 2], [95, 3], [99.4, 3], [99.5, 4], [100, 4], [130, 4], [NaN, 0]];
+  for (const [pct, lvl] of cases) assert.equal(U.heatLevel(pct), lvl, `pct ${pct}`);
+  assert.deepEqual(U.WARN_WORDS.slice(1), ['running hot', 'redline', 'last drop']);
+});
+
+test('auroraStrength ramps from 90 to 100', () => {
+  assert.equal(U.auroraStrength(89.9), 0);
+  assert.equal(U.auroraStrength(90), 0);
+  assert.equal(U.auroraStrength(95), 0.5);
+  assert.equal(U.auroraStrength(100), 1);
+  assert.equal(U.auroraStrength(120), 1);
+  assert.equal(U.auroraStrength(NaN), 0);
+});
+
+test('heatRgb goes from amber to red', () => {
+  assert.equal(U.heatRgb(0), '255, 160, 40');
+  assert.equal(U.heatRgb(1), '240, 50, 35');
+  assert.equal(U.heatRgb(5), '240, 50, 35');
+});
+
+test('formatResetAt: time only when soon, weekday when further out', () => {
+  const now = new Date(2026, 10, 25, 9, 0).getTime();
+  const soon = U.formatResetAt(new Date(2026, 10, 25, 21, 40), now, 'en-US');
+  assert.equal(soon, '9:40 PM');
+  const later = U.formatResetAt(new Date(2026, 10, 27, 9, 0), now, 'en-US');
+  assert.equal(later, 'Fri 9 AM');
+});
