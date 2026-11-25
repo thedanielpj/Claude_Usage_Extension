@@ -332,3 +332,14 @@ test('formatResetAt: time only when soon, weekday when further out', () => {
   const later = U.formatResetAt(new Date(2026, 10, 27, 9, 0), now, 'en-US');
   assert.equal(later, 'Fri 9 AM');
 });
+
+test('placeOverlay: no fully clear spot -> slide right up to the buttons to cover less title', () => {
+  // title 413..821, gap before "Step" button only 276px for a 338px strip
+  const items = [
+    { l: 225, r: 390, ctl: false },
+    { l: 413, r: 821, ctl: false },
+    { l: 1121, r: 1205, ctl: true },
+    { l: 1221, r: 1273, ctl: true },
+  ];
+  assert.equal(U.placeOverlay(items, 579, 338, 1288), 1121 - 12 - 338);
+});

@@ -1059,16 +1059,20 @@
   let itemsDue = true;
   let bandEls = [];
   let headerItems = [];
+  let headerBox = { l: 0, r: window.innerWidth };
 
   // What the page header already shows (chat title text, buttons, icons), as horizontal
   // extents, so the strip can slide right instead of covering a long title.
   const CTL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"], img, svg';
+  // A real button is small with a short label ("Share", "Step 3 of 5"). A long label (the
+  // renamable chat title, a breadcrumb link) is text the strip may cover if it must.
+  const isButton = (el, r) => r.width < 160 && (el.textContent || '').trim().length <= 16;
   function measureHeaderItems(h) {
     const out = [];
     const vw = window.innerWidth;
     const inBand = (r) => r.width > 0 && r.height > 0 && r.bottom > 2 && r.top < h - 2;
     const visible = (el) => !el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true });
-    let budget = 800; // cap the work on very large headers
+    let budget = 3000; // cap the work on very large headers
     const range = document.createRange();
     const roots = bandEls.filter((e) => e.isConnected && !bandEls.some((o) => o !== e && o.contains(e)));
     for (const bandEl of roots) {
@@ -1080,16 +1084,96 @@
           if (!parent || host.contains(parent) || !visible(parent)) continue;
           range.selectNodeContents(n);
           const r = range.getBoundingClientRect();
-          if (inBand(r)) out.push({ l: r.left, r: r.right, ctl: false });
+          if (inBand(r)) {
+            // only the visible part: titles are often cut off with an ellipsis
+            let l = r.left;
+            let rr = r.right;
+            for (let el = parent, i = 0; el && i < 6 && el !== document.body; el = el.parentElement, i++) {
+              if (getComputedStyle(el).overflowX !== 'visible') {
+                const b = el.getBoundingClientRect();
+                l = Math.max(l, b.left);
+                rr = Math.min(rr, b.right);
+              }
+            }
+            if (rr > l) out.push({ l, r: rr, ctl: false });
+          }
         } else if (n.matches(CTL_SELECTOR) && !host.contains(n) && visible(n)) {
           const r = n.getBoundingClientRect();
           // a control stretched across most of the header is a layout wrapper, not a button
-          if (inBand(r) && r.width < vw * 0.6) out.push({ l: r.left, r: r.right, ctl: true });
+          // a wide control (e.g. the renamable chat title) is text to avoid, not a button to stay off
+          if (inBand(r) && r.width < vw * 0.6) out.push({ l: r.left, r: r.right, ctl: isButton(n, r) });
         }
       }
     }
     return out;
   }
+
+  // Second, structure-free look at the header: hit-test a line across its middle (with the
+  // strip itself made see-through for the moment) and record where there is visible text or
+  // a button. Catches titles the DOM walk misses, and respects text clipped with an ellipsis.
+  const STEP = 4;
+  function sampleHeader(h, from, to) {
+    const y = Math.max(4, Math.round((h - 1) / 2));
+    const runs = [];
+    let cur = null;
+    const prev = host.style.pointerEvents;
+    host.style.pointerEvents = 'none';
+    try {
+      for (let x = Math.max(1, from); x < to; x += STEP) {
+        let kind = null;
+        const el = document.elementFromPoint(x, y);
+        if (el && el !== document.body && el !== document.documentElement) {
+          const c = el.closest(CTL_SELECTOR);
+          const cr = c && c.getBoundingClientRect();
+          // small controls are buttons to stay off; a wide one (like a renamable title) counts as text
+          if (cr && isButton(c, cr)) kind = 'ctl';
+          else if (document.caretRangeFromPoint) {
+            const r = document.caretRangeFromPoint(x, y);
+            const n = r && r.startContainer;
+            if (n && n.nodeType === 3 && n.nodeValue.trim()) {
+              const rg = document.createRange();
+              const o = r.startOffset;
+              for (const [a, b] of [[o, o + 1], [o - 1, o]]) {
+                if (a < 0 || b > n.nodeValue.length) continue;
+                rg.setStart(n, a);
+                rg.setEnd(n, b);
+                const box = rg.getBoundingClientRect();
+                if (box.width && x >= box.left - STEP && x <= box.right + STEP && box.bottom > 2 && box.top < h) {
+                  kind = 'text';
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (kind && cur && cur.kind === kind && x - cur.r <= STEP * 3) cur.r = x;
+        else if (kind) runs.push((cur = { kind, l: x, r: x }));
+      }
+    } finally {
+      host.style.pointerEvents = prev;
+    }
+    return runs.map((u) => ({ l: u.l - STEP / 2, r: u.r + STEP / 2, ctl: u.kind === 'ctl' }));
+  }
+
+  // The header strip the chat column sits under: with a side panel open, claude.ai's header
+  // only spans the chat column, so the strip should stay inside it.
+  function headerBounds(axis, h) {
+    const vw = window.innerWidth;
+    const prev = host.style.pointerEvents;
+    host.style.pointerEvents = 'none';
+    let best = null;
+    try {
+      let el = document.elementFromPoint(Math.min(Math.max(axis, 1), vw - 1), Math.max(4, Math.round(h / 2)));
+      for (let i = 0; i < 12 && el && el !== document.body && el !== document.documentElement; i++, el = el.parentElement) {
+        const r = el.getBoundingClientRect();
+        if (r.top <= 4 && r.bottom <= h + 6 && r.height >= h * 0.6 && (!best || r.width > best.width)) best = r;
+      }
+    } finally {
+      host.style.pointerEvents = prev;
+    }
+    return best && best.width >= 300 ? { l: Math.max(0, best.left), r: Math.min(vw, best.right) } : { l: 0, r: vw };
+  }
+
   function layout() {
     const axis = findAxis();
     observe(composerRef);
@@ -1102,12 +1186,19 @@
     const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
     const width = rootEl.offsetWidth || 330;
     if (itemsDue) {
-      headerItems = measureHeaderItems(h);
+      headerBox = headerBounds(axis, h);
+      headerItems = measureHeaderItems(h).concat(sampleHeader(h, headerBox.l, headerBox.r));
       itemsDue = false;
     }
     // Centred on the composer; if that would sit on the chat title or buttons, slide right.
     const centered = U.centeredLeft(axis, width, window.innerWidth, EDGE);
-    const left = U.placeOverlay(headerItems, centered, width, window.innerWidth, EDGE);
+    // Work in the chat header's own coordinates so the strip stays inside it (side panel open).
+    const bx = headerBox.l;
+    const local = headerItems
+      .filter((i) => i.r > headerBox.l && i.l < headerBox.r) // ignore a side panel's own header
+      .map((i) => ({ l: Math.max(0, i.l - bx), r: Math.min(headerBox.r, i.r) - bx, ctl: i.ctl }));
+    const start = Math.min(Math.max(centered, bx + EDGE), headerBox.r - width - EDGE) - bx;
+    const left = bx + U.placeOverlay(local, start, width, headerBox.r - bx, EDGE);
     let changed = false;
 
     if (left !== layoutCache.left) {
