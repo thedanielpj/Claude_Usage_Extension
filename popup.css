@@ -1,7 +1,7 @@
 :root { color-scheme: light dark; --bg:#fff; --fg:#1f1f1f; --muted:#6b6b6b; --line:#e6e6e6; --off:#c8c8c8; --on:#1f1f1f; --knob:#fff; }
 @media (prefers-color-scheme: dark) { :root { --bg:#191919; --fg:#efefef; --muted:#9a9a9a; --line:#2c2c2c; --off:#454545; --on:#efefef; --knob:#191919; } }
 * { box-sizing: border-box; }
-body { margin:0; width:280px; background:var(--bg); color:var(--fg); font:13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin:0; width:220px; background:var(--bg); color:var(--fg); font:13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { padding:14px 14px 12px; }
 .row { display:flex; align-items:center; justify-content:space-between; cursor:pointer; }
 .name { font-weight:500; }
@@ -17,17 +17,3 @@ footer a { font-size:11px; color:var(--muted); text-decoration:none; }
 footer a:hover, footer a:focus-visible { text-decoration:underline; }
 @media (prefers-reduced-motion: reduce) { .track, .track::after { transition:none; } }
 
-/* TEMP-TEST */
-.test { border-top:1px dashed var(--line); padding:10px 14px 12px; }
-.test-title { font-size:11px; color:var(--muted); margin-bottom:8px; }
-.tiers { display:flex; gap:4px; }
-.tiers button, .pick button { flex:1; font:inherit; font-size:12px; padding:5px 0; color:var(--fg); background:transparent; border:1px solid var(--line); border-radius:6px; cursor:pointer; }
-.tiers button:hover, .pick button:hover { background:var(--line); }
-.pick { display:flex; gap:4px; margin-top:6px; }
-.pick select { flex:3; min-width:0; font:inherit; font-size:12px; padding:4px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; }
-.pick button { flex:1; }
-.t-gap { margin-top:12px; }
-.lim { display:flex; align-items:center; gap:6px; margin-top:4px; }
-.lim > span { width:50px; font-size:11px; color:var(--muted); }
-.lim .tiers { flex:1; }
-.tiers button[aria-pressed="true"] { background:var(--fg); color:var(--bg); border-color:var(--fg); }

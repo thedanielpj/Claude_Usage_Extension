@@ -161,7 +161,6 @@
     warn: { session: { level: 0, until: 0, next: 0 }, weekly: { level: 0, until: 0, next: 0 } },
     lastOut: { session: null, weekly: null }, // for the "reloaded" moment
     relitUntil: { session: 0, weekly: 0 },
-    test: null, // TEMP-TEST: { session, weekly } usage overrides from the popup
   };
 
   const snapshotOf = (parsed) => {
@@ -603,11 +602,8 @@
     setWarnClass(wLabelEl, typeof v === 'number' && text === U.WARN_WORDS[v] ? v : 0);
   }
 
-  // TEMP-TEST: the popup can override the percentages to preview each state.
-  const withTest = (w, key) => (w && state.test && state.test[key] != null ? Object.assign({}, w, { pct: state.test[key] }) : w);
-  const rawSession = () => U.pickSession(state.parsed.windows);
-  const sessionWindow = () => withTest(rawSession(), 'session');
-  const weeklyWindow = () => withTest(U.pickWeekly(state.parsed.windows, rawSession()), 'weekly');
+  const sessionWindow = () => U.pickSession(state.parsed.windows);
+  const weeklyWindow = () => U.pickWeekly(state.parsed.windows, sessionWindow());
 
   /** Warning word schedule for one cell: shows for a few seconds now and then while heating up. */
   function warnFor(key, level, now) {
@@ -1232,15 +1228,6 @@
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
-      // TEMP-TEST: the popup's test panel asks for a burn. Remove with popup-testpanel.js.
-      if (area === 'local' && changes.cuo_test_usage) {
-        state.test = changes.cuo_test_usage.newValue || null;
-        render();
-      }
-      if (area === 'local' && changes.cuo_test_burn && changes.cuo_test_burn.newValue) {
-        const t = changes.cuo_test_burn.newValue;
-        if (!state.hidden && state.status === 'ok' && t.delta > 0) burn(t.delta, { fresh: true, word: t.word });
-      }
       if (area !== 'local' || !changes[KEY_HIDDEN]) return;
       state.hidden = !!changes[KEY_HIDDEN].newValue;
       if (state.hidden) setOpen(false);
@@ -1274,9 +1261,8 @@
   }, CFG.finishCheckMs);
 
   (async function init() {
-    const saved = await store.get([KEY_HIDDEN, 'cuo_test_usage']);
+    const saved = await store.get([KEY_HIDDEN]);
     state.hidden = saved[KEY_HIDDEN] === true;
-    state.test = saved.cuo_test_usage || null; // TEMP-TEST
     injectFont();
     document.documentElement.appendChild(host);
     observe(document.documentElement);
