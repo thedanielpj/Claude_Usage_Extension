@@ -301,3 +301,28 @@ test('placeBetween: never runs into the buttons or a side panel', () => {
   // gap too narrow: stay off the buttons, title end goes under
   assert.equal(U.placeBetween(579, 338, 833, 1121), 771);
 });
+
+test('splitHeader: title chevron past the middle still counts as the title', () => {
+  // breadcrumb, title, chevron (631..660), then Step / Share far right
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 630 }, { l: 631, r: 660 }, { l: 866, r: 960 }, { l: 975, r: 1040 }];
+  assert.deepEqual(U.splitHeader(c), { lastLeft: 660, firstRight: 866 });
+});
+
+test('splitHeader: no right-side buttons (side panel open) -> all left', () => {
+  const c = [{ l: 120, r: 160 }, { l: 196, r: 330 }, { l: 340, r: 630 }, { l: 631, r: 660 }];
+  assert.deepEqual(U.splitHeader(c), { lastLeft: 660, firstRight: null });
+});
+
+test('splitHeader: empty', () => {
+  assert.deepEqual(U.splitHeader([]), { lastLeft: null, firstRight: null });
+});
+
+test('splitHeader: long title pressed against the buttons -> trailing text buttons are the right group', () => {
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 720 }, { l: 720, r: 735 }, { l: 735, r: 820, btn: true }, { l: 836, r: 884, btn: true }];
+  assert.deepEqual(U.splitHeader(c, 900), { lastLeft: 735, firstRight: 735 });
+});
+
+test('splitHeader: side panel, title + icon chevron near the panel edge -> all left', () => {
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 583 }, { l: 583, r: 596 }];
+  assert.deepEqual(U.splitHeader(c, 612), { lastLeft: 596, firstRight: null });
+});

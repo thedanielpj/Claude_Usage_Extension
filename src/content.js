@@ -1094,6 +1094,7 @@
     const col = chatColumn(axis);
     let left = col.l;
     let right = col.r;
+    const ctrls = [];
     for (const el of document.querySelectorAll(CTRL)) {
       if (host.contains(el)) continue;
       const r = el.getBoundingClientRect();
@@ -1101,9 +1102,12 @@
       if (r.right <= col.l || r.left >= col.r) continue; // sidebar or side panel
       if (el.parentElement && el.parentElement.closest(CTRL)) continue; // part of a bigger control
       if (isPageContent(el)) continue;
-      if (r.left < axis) left = Math.max(left, r.right); // title, breadcrumb: stay right of them
-      else right = Math.min(right, r.left); // header buttons: stay left of them
+      const label = (el.textContent || '').trim();
+      ctrls.push({ l: r.left, r: r.right, btn: !!label && label.length <= 16 && r.width < 160 });
     }
+    const { lastLeft, firstRight } = U.splitHeader(ctrls, col.r);
+    if (lastLeft != null) left = Math.max(left, lastLeft); // title + chevron: stay right of them
+    if (firstRight != null) right = Math.min(right, firstRight); // header buttons: stay left of them
     return { left, right };
   }
 

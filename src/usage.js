@@ -195,6 +195,41 @@
   }
 
   /**
+   * Split the header's controls into the left group (breadcrumb, chat title, its chevron) and
+   * the right group (Share etc.) at the widest empty stretch between them. Returns the right
+   * edge of the left group and the left edge of the right group (null if a group is missing).
+   * Gaps under `minGap` px don't split, so a header with no right-side buttons is all "left".
+   * ctrls: [{l, r, btn}] (btn = a short text button). end = right edge of the header.
+   */
+  function splitHeader(ctrls, end = null, minGap = 48) {
+    const xs = ctrls.filter((c) => c.r > c.l).sort((a, b) => a.l - b.l);
+    if (!xs.length) return { lastLeft: null, firstRight: null };
+    let reach = xs[0].r;
+    let best = { gap: 0, at: xs.length };
+    for (let i = 1; i < xs.length; i++) {
+      const gap = xs[i].l - reach;
+      if (gap > best.gap) best = { gap, at: i };
+      reach = Math.max(reach, xs[i].r);
+    }
+    let at = best.gap >= minGap ? best.at : xs.length;
+    if (at === xs.length && end != null) {
+      // No clear gap (long title pressed up against the buttons): the right group is the run of
+      // short text buttons ("Step 3 of 5", "Share") at the header's right end.
+      let i = xs.length;
+      if (end - xs[i - 1].r <= 60) {
+        while (i > 0 && xs[i - 1].btn && (i === xs.length || xs[i].l - xs[i - 1].r <= 32)) i--;
+        if (i < xs.length) at = i;
+      }
+    }
+    const leftGroup = xs.slice(0, at);
+    const rightGroup = xs.slice(at);
+    return {
+      lastLeft: leftGroup.length ? Math.max(...leftGroup.map((c) => c.r)) : null,
+      firstRight: rightGroup.length ? Math.min(...rightGroup.map((c) => c.l)) : null,
+    };
+  }
+
+  /**
    * Left edge for the strip between the header's title (left bound) and its buttons or a side
    * panel (right bound). Stays centred if that fits, else slides right past the title. If the
    * gap is too narrow for both, it stays off the buttons and the end of the title goes under.
@@ -280,6 +315,7 @@
     pickSeparator,
     centeredLeft,
     placeBetween,
+    splitHeader,
     pickSession,
     pickWeekly,
     shortLabel,
