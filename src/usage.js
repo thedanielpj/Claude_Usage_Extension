@@ -194,15 +194,145 @@
     return Math.round(Math.min(Math.max(axis - width / 2, edge), max));
   }
 
+  /**
+   * Split the header's controls into the left group (breadcrumb, chat title, its chevron) and
+   * the right group (Share etc.) at the widest empty stretch between them. Returns the right
+   * edge of the left group and the left edge of the right group (null if a group is missing).
+   * Gaps under `minGap` px don't split, so a header with no right-side buttons is all "left".
+   * ctrls: [{l, r, btn}] (btn = a short text button). end = right edge of the header,
+   * mid = the composer's centre line.
+   */
+  function splitHeader(ctrls, end = null, mid = null, minGap = 48) {
+    const xs = ctrls.filter((c) => c.r > c.l).sort((a, b) => a.l - b.l);
+    if (!xs.length) return { lastLeft: null, firstRight: null };
+    let reach = xs[0].r;
+    let best = { gap: 0, at: xs.length };
+    for (let i = 1; i < xs.length; i++) {
+      const gap = xs[i].l - reach;
+      if (gap > best.gap) best = { gap, at: i };
+      reach = Math.max(reach, xs[i].r);
+    }
+    let at = best.gap >= minGap ? best.at : xs.length;
+    // The buttons on the right never start left of the composer's centre: a split there means
+    // the widest gap was inside the title side (e.g. sidebar icons | breadcrumb), so no split.
+    if (mid != null && at < xs.length && xs[at].l < mid) at = xs.length;
+    if (at === xs.length && end != null) {
+      // No clear gap (long title pressed up against the buttons): the right group is the run of
+      // short text buttons ("Step 3 of 5", "Share") at the header's right end.
+      let i = xs.length;
+      if (end - xs[i - 1].r <= 60) {
+        while (i > 0 && xs[i - 1].btn && (i === xs.length || xs[i].l - xs[i - 1].r <= 32)) i--;
+        if (i < xs.length) at = i;
+      }
+    }
+    const leftGroup = xs.slice(0, at);
+    const rightGroup = xs.slice(at);
+    return {
+      lastLeft: leftGroup.length ? Math.max(...leftGroup.map((c) => c.r)) : null,
+      firstRight: rightGroup.length ? Math.min(...rightGroup.map((c) => c.l)) : null,
+    };
+  }
+
+  /**
+   * Left edge for the strip between the header's title (left bound) and its buttons or a side
+   * panel (right bound). Stays centred if that fits, else slides right past the title. If the
+   * gap is too narrow for both, it stays off the buttons and the end of the title goes under.
+   */
+  function placeBetween(centered, width, left, right, edge = 8, gap = 12) {
+    const lo = left + gap;
+    const hi = right - gap - width;
+    if (hi >= lo) return Math.round(Math.min(Math.max(centered, lo), hi));
+    return Math.round(Math.max(edge, hi));
+  }
+
+  /**
+   * Heat level of a usage window: 0 below 80%, 1 at 80-89 ("running hot"), 2 at 90-94
+   * ("redline"), 3 at 95%+ ("last drop"), 4 once the limit is hit (99.5%+, "burnt out").
+   */
+  const HIT_PCT = 99.5;
+  function heatLevel(pct) {
+    if (!Number.isFinite(pct)) return 0;
+    if (pct >= HIT_PCT) return 4;
+    if (pct >= 95) return 3;
+    if (pct >= 90) return 2;
+    if (pct >= 80) return 1;
+    return 0;
+  }
+  const WARN_WORDS = ['', 'running hot', 'redline', 'last drop'];
+
+  /** 0..1 strength of the background glow: 0 below 90%, rising to 1 at 100%. */
+  function auroraStrength(pct) {
+    if (!Number.isFinite(pct) || pct < 90) return 0;
+    return Math.min(1, (pct - 90) / 10);
+  }
+
+  /** Glow colour for a strength 0..1: amber at 90%, through to a soft red at 100%. "r, g, b". */
+  function heatRgb(q) {
+    const t = Math.min(1, Math.max(0, q || 0));
+    const mix = (a, b) => Math.round(a + (b - a) * t);
+    return `${mix(255, 240)}, ${mix(160, 50)}, ${mix(40, 35)}`;
+  }
+
+  /**
+   * When a hit limit comes back, short: "9:40 PM" if that's within the next ~20h,
+   * otherwise "Thu 9 AM" (minutes dropped when they are :00).
+   */
+  function formatResetAt(date, now = Date.now(), locale) {
+    const opts = { hour: 'numeric' };
+    if (date.getMinutes() !== 0) opts.minute = '2-digit';
+    const soon = date.getTime() - now < 20 * 3600 * 1000;
+    if (!soon) opts.weekday = 'short';
+    return date.toLocaleTimeString(locale, opts);
+  }
+
+  /**
+   * Fun word shown in place of the "session" label while the burn animation runs.
+   * Picked at random from a pool chosen by how much was just used. Spelling is
+   * intentional. Tiers: +1 | 2-7 | 8-15 | 16-40 | 41+.
+   */
+  const BURN_WORDS = [
+    { max: 1, words: ['sparked', 'sizzled', 'noice', 'tidy', 'neat', 'clean', 'burnt', 'crisp', 'cute'] },
+    { max: 7, words: ['toasted', 'scorched', 'torched', 'blazed', 'solid', 'sheesh', 'bussin', 'cooked', 'smooth'] },
+    { max: 15, words: ['blasted', 'kaboom', 'ouch', 'daammn', 'yowza', 'banger'] },
+    { max: 40, words: ['nuked', 'wildfire', 'lessgoo', 'massive', 'absurd'] },
+    { max: Infinity, words: ['shattered', 'legend', 'godmode', 'cinema'] },
+  ];
+
+  /** How hard the burn should hit, 0 (tier 1, +1%) to 1 (top tier, 41%+), stepped by tier. */
+  function burnPower(delta) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    const i = BURN_WORDS.findIndex((t) => d <= t.max);
+    return (i < 0 ? BURN_WORDS.length - 1 : i) / (BURN_WORDS.length - 1);
+  }
+
+  /** Random word for a burn of `delta` percentage points. `rng` returns [0, 1). */
+  function pickBurnWord(delta, rng = Math.random) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    const tier = BURN_WORDS.find((t) => d <= t.max) || BURN_WORDS[BURN_WORDS.length - 1];
+    const i = Math.min(tier.words.length - 1, Math.max(0, Math.floor(rng() * tier.words.length)));
+    return tier.words[i];
+  }
+
   const api = {
     parseUsage,
     primaryWindow,
     pickSeparator,
     centeredLeft,
+    placeBetween,
+    splitHeader,
     pickSession,
     pickWeekly,
     shortLabel,
     sessionDelta,
+    pickBurnWord,
+    heatLevel,
+    HIT_PCT,
+    WARN_WORDS,
+    auroraStrength,
+    heatRgb,
+    formatResetAt,
+    burnPower,
+    BURN_WORDS,
     severity,
     formatCountdown,
     formatAgo,

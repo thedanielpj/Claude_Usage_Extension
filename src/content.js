@@ -6,7 +6,7 @@
  *   [ session · 2h 13m  43% ][ weekly 15% ]
  *     └ gradient progress line along the bottom edge
  *
- *  - weekly flips between its percentage and time-left every ~30s
+ *  - the weekly label flips to time-left (the percentage stays put) every ~30s
  *  - when a prompt finishes and session usage jumps (10% -> 15%), the session
  *    cell lights up with a fire animation and shows "+5%" for a few seconds
  *
@@ -28,9 +28,15 @@
       refreshMs: 30 * 1000, // poll interval while the tab is visible
       minGapMs: 10 * 1000, // never poll (unforced) more often than this
       tickMs: 15 * 1000, // re-render countdowns
-      flipEveryMs: 30 * 1000, // weekly: how often to flip to time-left
+      flipEveryMs: 30 * 1000, // weekly: how often the label flips to time-left
       flipHoldMs: 6 * 1000, // weekly: how long time-left stays up
-      burnHoldMs: 5 * 1000, // fire animation hold
+      warnEveryMs: 45 * 1000, // near the limit: how often the warning word shows
+      warnHoldMs: 3500, // ...and for how long
+      warnFirstMs: 1200, // first warning shortly after crossing a threshold
+      relitMs: 3000, // "reloaded" moment after a hit limit resets
+      burnHoldMs: 5 * 1000, // flame + word hold
+      burnFadeMs: 1600, // slow die-out after the hold
+      flameFrameMs: 70, // flame frame step (~14 fps)
       finishCheckMs: 1000, // how often to look for "generation finished"
       finishRefreshAfterMs: [1500, 6000, 15000], // refresh attempts after a prompt finishes
     },
@@ -148,9 +154,13 @@
     fetching: false,
     open: false,
     hidden: false,
-    weeklyFace: 'pct', // pct | time
+    weeklyFace: 'pct', // pct (label shows "weekly") | time (label shows time left)
+    weeklyView: 0, // 0 normal | 1-3 warning word | 'out' | 'relit'
     flipping: false,
-    burn: null, // { delta, timer }
+    burn: null, // { delta, word, fading, timer, fadeTimer }
+    warn: { session: { level: 0, until: 0, next: 0 }, weekly: { level: 0, until: 0, next: 0 } },
+    lastOut: { session: null, weekly: null }, // for the "reloaded" moment
+    relitUntil: { session: 0, weekly: 0 },
   };
 
   const snapshotOf = (parsed) => {
@@ -222,10 +232,14 @@
   function injectFont() {
     try {
       const url = chrome.runtime.getURL('fonts/inter-latin-wght-normal.woff2');
+      const burnUrl = chrome.runtime.getURL('fonts/bangers-latin-400-normal.woff2');
       const style = document.createElement('style');
       style.textContent =
         '@font-face{font-family:"Cuo Inter";font-style:normal;font-weight:100 900;' +
-        `font-display:swap;src:url("${url}") format("woff2");}`;
+        `font-display:swap;src:url("${url}") format("woff2");}` +
+        // Bangers (SIL OFL) is only used for the burn word.
+        '@font-face{font-family:"Cuo Bangers";font-style:normal;font-weight:400;' +
+        `font-display:swap;src:url("${burnUrl}") format("woff2");}`;
       (document.head || document.documentElement).appendChild(style);
     } catch (e) {
       /* ignore */
@@ -271,6 +285,7 @@
 /* If the page's separator can't be found, draw our own 1px bottom edge instead. */
 .root.fallback .cell { height: var(--h); border-bottom-width: var(--bw); }
 .weekly { display: flex; align-items: center; gap: 16px; }
+.weekly > .flip, .weekly > .val { position: relative; z-index: 1; }
 
 .face {
   grid-area: 1 / 1; z-index: 1;
@@ -278,9 +293,13 @@
   transition: opacity 260ms ease, transform 260ms ease;
 }
 .head { display: flex; align-items: center; gap: 8px; }
+.eta { font-size: 12px; } /* countdown a touch smaller than the label and percentage (14px) */
 .dot { width: 2px; height: 2px; flex: none; border-radius: 50%; background: var(--muted); }
 .pct, .val { font-weight: 500; color: var(--fg); }
-.val { display: inline-block; min-width: 42px; backface-visibility: hidden; }
+.val { display: inline-block; min-width: 42px; }
+/* weekly label: flips to the time left. Fixed slot so the cell doesn't jump between the two. */
+.wl { display: inline-block; min-width: 52px; text-align: right; backface-visibility: hidden; }
+.wl.time { font-size: 12px; }
 .flip { display: inline-block; perspective: 240px; }
 
 /* ---------- progress line (session utilisation) ---------- */
@@ -292,61 +311,135 @@
 }
 
 /* ---------- burn state ---------- */
-.face.burn { opacity: 0; transform: translateY(6px); gap: 8px; pointer-events: none; }
-.burn .delta { font-weight: 600; color: #ffb27a; }
-.fire { width: 20px; height: 20px; flex: none; transform-origin: 50% 100%; }
-.session.burning .face.normal { opacity: 0; transform: translateY(-6px); }
-.session.burning .face.burn { opacity: 1; transform: none; }
-.session.burning .fire { animation: cuo-flicker 520ms ease-in-out infinite alternate; }
+/* Orange tint + a jet-thrust flame fill the session cell. The fun word and +N% take the
+   label/percentage slots and glow light yellow on top of it. */
+.fx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+/* --p (0..1) is the burn's power, set from the size of the jump: bigger jump = bigger,
+   faster, hotter flame (see burnPower in usage.js). */
+.session { --p: 0; }
+.tint {
+  position: absolute; inset: 0; opacity: 0;
+  background: linear-gradient(270deg,
+    rgba(255, 90, 10, calc(0.26 + 0.2 * var(--p))),
+    rgba(255, 130, 20, calc(0.09 + 0.12 * var(--p))) 70%,
+    rgba(255, 130, 20, calc(0.04 + 0.08 * var(--p))));
+  transition: opacity 400ms ease;
+}
+.session.burning .tint { opacity: 1; animation: cuo-tint calc(300ms - 160ms * var(--p)) steps(1, end) infinite; }
+.session.burning.fading .tint { opacity: 0; animation: none; transition: opacity 1500ms ease-in; }
+.thrust {
+  position: absolute; right: -3%; top: calc(-6% - 20% * var(--p)); width: calc(100% + 40% * var(--p)); height: calc(112% + 40% * var(--p));
+  transform-origin: 100% 50%; transform: translateX(100%); opacity: 0;
+}
+.session.burning .thrust {
+  opacity: 1; transform: none;
+  transition: transform calc(230ms - 120ms * var(--p)) cubic-bezier(0.05, 0.9, 0.2, 1), opacity 60ms linear;
+}
+.session.burning.fading .thrust {
+  opacity: 0; transform: translateX(30%) scaleX(0.7);
+  transition: transform 1500ms ease-in, opacity 1500ms ease-in;
+}
+.thrust g.f { display: none; }
+.thrust g.f.on { display: inline; }
+.session.burning .head > span, .session.burning .head > .dot, .session.burning .pct {
+  color: #fff1a8;
+  text-shadow: 0 0 calc(6px + 8px * var(--p)) rgba(255, 214, 102, calc(0.4 + 0.4 * var(--p))), 0 0 2px rgba(70, 15, 0, 0.85), 0 1px 1px rgba(70, 15, 0, 0.8);
+  transition: color 300ms ease, text-shadow 300ms ease;
+}
+.session.burning .head > .dot { background: #fff1a8; box-shadow: none; }
+.session.burning .pct { font-weight: 600; }
+/* The fun word: Bangers (comic caps), falls back to Inter if the font can't load. */
+.session.burning .head > span:first-child {
+  font-family: "Cuo Bangers", "Cuo Inter", Inter, system-ui, sans-serif;
+  font-weight: 400; font-size: 18px; letter-spacing: 0.04em;
+}
+.session.burning.fading .head > span, .session.burning.fading .pct {
+  color: var(--fg); text-shadow: none; transition: color 1500ms ease-in, text-shadow 1500ms ease-in;
+}
+.session.burning.fading .head > span { color: var(--muted); }
+@keyframes cuo-tint { 0% { opacity: 1; } 35% { opacity: 0.72; } 60% { opacity: 0.9; } 80% { opacity: 0.6; } }
 
-.flame {
-  position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
-  background: linear-gradient(90deg, rgba(255, 85, 0, 0.21) 0%, rgba(242, 141, 0, 0.21) 100%);
-  transform: scaleX(-1);
-  opacity: 0; transition: opacity 450ms ease;
-}
-.session.burning .flame { opacity: 1; }
-.flame::before, .flame::after {
-  content: ""; position: absolute; left: -10%; right: -10%; bottom: -35%; height: 150%;
-  transform-origin: 50% 100%;
-}
-.flame::before {
-  background:
-    radial-gradient(38% 80% at 14% 100%, rgba(255, 85, 0, 0.9), transparent 72%),
-    radial-gradient(34% 100% at 50% 100%, rgba(242, 141, 0, 0.85), transparent 72%),
-    radial-gradient(38% 82% at 86% 100%, rgba(255, 85, 0, 0.9), transparent 72%);
-  animation: cuo-lick 880ms ease-in-out infinite alternate;
-}
-.flame::after {
-  background:
-    radial-gradient(30% 70% at 30% 100%, rgba(255, 190, 60, 0.7), transparent 72%),
-    radial-gradient(30% 76% at 70% 100%, rgba(255, 160, 30, 0.7), transparent 72%);
-  animation: cuo-lick 640ms ease-in-out infinite alternate-reverse;
-}
-.ember {
-  position: absolute; bottom: 4px; width: 3px; height: 3px; border-radius: 50%;
-  background: #ffc15a; box-shadow: 0 0 4px 1px rgba(255, 150, 40, 0.8); opacity: 0;
-}
-.session.burning .ember { animation: cuo-ember 1400ms ease-out infinite; }
-.ember:nth-child(1) { left: 18%; animation-delay: 0ms; }
-.ember:nth-child(2) { left: 46%; animation-delay: 420ms; }
-.ember:nth-child(3) { left: 71%; animation-delay: 840ms; }
-.ember:nth-child(4) { left: 88%; animation-delay: 210ms; }
 
-@keyframes cuo-lick {
-  0%   { transform: scaleY(0.78) skewX(-3deg); opacity: 0.7; }
-  50%  { transform: scaleY(1.05) skewX(2deg);  opacity: 1; }
-  100% { transform: scaleY(0.9)  skewX(-1deg); opacity: 0.82; }
+/* ---------- heat: nearing the limit ---------- */
+/* Progress line heats up: 80% hot, 90% red-orange, 95% red with a slow pulse.
+   Weekly only shows its line once it is heating up. */
+.weekly .line { opacity: 0; transition: opacity 600ms ease; }
+.weekly.heat-1 .line, .weekly.heat-2 .line, .weekly.heat-3 .line, .weekly.out .line { opacity: 1; }
+.heat-1 .fill { background: linear-gradient(90deg, #ff7a00, #ffae1a); box-shadow: 0 0 4px rgba(255, 150, 20, 0.55); }
+.heat-2 .fill { background: linear-gradient(90deg, #ff4a10, #ff7a1a); box-shadow: 0 0 5px rgba(255, 80, 20, 0.6); }
+.heat-3 .fill { background: linear-gradient(90deg, #f02a1a, #ff5a2a); box-shadow: 0 0 6px rgba(240, 50, 30, 0.7);
+  animation: cuo-pulse 2400ms ease-in-out infinite; }
+@keyframes cuo-pulse { 50% { opacity: 0.5; } }
+
+/* Warning word ("running hot" / "redline" / "last drop"), shown for a few seconds now and then. */
+.warn-1 { color: #e9a85a !important; }
+.warn-2 { color: #f08a5e !important; }
+.warn-3 { color: #f07060 !important; }
+.weekly.heat-1 .wl, .weekly.heat-2 .wl, .weekly.heat-3 .wl { min-width: 72px; } /* room for the word, no jump */
+
+/* Northern-lights glow from 90% to the limit: soft blurred light drifting along the bottom
+   half of the strip, amber at 90% warming to a gentle red at 100%. --q = 0..1, --heat = r,g,b */
+.root { --q: 0; --heat: 255, 160, 40; }
+.aurora {
+  position: absolute; left: -30%; right: -30%; bottom: -35%; height: 90%;
+  opacity: 0; filter: blur(9px); transition: opacity 1400ms ease;
 }
-@keyframes cuo-flicker {
-  0%   { transform: scale(1, 0.94) rotate(-2deg); }
-  100% { transform: scale(1.06, 1.08) rotate(2deg); }
+.root.aurora-on .cell:not(.out):not(.burning) .aurora { opacity: calc(0.6 + 0.4 * var(--q)); }
+.aurora i {
+  position: absolute; bottom: 0; width: 55%; height: 100%; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 100%, rgba(var(--heat), calc(0.30 + 0.16 * var(--q))), rgba(var(--heat), 0) 70%);
 }
-@keyframes cuo-ember {
-  0%   { transform: translateY(0); opacity: 0; }
-  15%  { opacity: 0.95; }
-  100% { transform: translateY(-30px) translateX(4px); opacity: 0; }
+.aurora i:nth-child(1) { left: 0; animation: cuo-aur-a 13s ease-in-out infinite alternate; }
+.aurora i:nth-child(2) { left: 25%; animation: cuo-aur-b 17s ease-in-out infinite alternate; opacity: 0.8; }
+.aurora i:nth-child(3) { left: 48%; animation: cuo-aur-c 11s ease-in-out infinite alternate; opacity: 0.9; }
+@keyframes cuo-aur-a { 0% { transform: translateX(-10%) scaleY(0.75); } 50% { transform: translateX(25%) scaleY(1.05); } 100% { transform: translateX(45%) scaleY(0.85); } }
+@keyframes cuo-aur-b { 0% { transform: translateX(20%) scaleY(1); } 50% { transform: translateX(-20%) scaleY(0.7); } 100% { transform: translateX(10%) scaleY(1.1); } }
+@keyframes cuo-aur-c { 0% { transform: translateX(10%) scaleY(0.9); } 50% { transform: translateX(-30%) scaleY(1.15); } 100% { transform: translateX(-5%) scaleY(0.8); } }
+
+/* Burn tie-in: at 90%+ the flame burns red. */
+.session.hot .thrust g.f { fill: url(#cuo-thrust-red); }
+.session.hot .tint {
+  background: linear-gradient(270deg, rgba(225, 40, 20, calc(0.28 + 0.2 * var(--p))),
+    rgba(230, 60, 30, calc(0.1 + 0.12 * var(--p))) 70%, rgba(230, 60, 30, calc(0.05 + 0.08 * var(--p))));
 }
+
+/* ---------- burnt out: the limit is hit ---------- */
+/* Charred cell, ash-grey text, a faint ember smoulder along the bottom, line burnt full. */
+.cell.out { background: #110d0c; }
+.char { position: absolute; inset: 0; opacity: 0; transition: opacity 1200ms ease; }
+.cell.out .char { opacity: 1; }
+.char::before {
+  content: ''; position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 70% at 50% 135%, rgba(150, 40, 12, 0.32), rgba(150, 40, 12, 0) 70%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0) 40%, rgba(60, 18, 8, 0.25));
+  animation: cuo-smoulder 5200ms ease-in-out infinite;
+}
+.char i {
+  position: absolute; bottom: 3px; width: 2px; height: 2px; border-radius: 50%;
+  background: #ff7a3a; box-shadow: 0 0 4px 1px rgba(255, 100, 40, 0.7); opacity: 0;
+  animation: cuo-ember-glow 4200ms ease-in-out infinite;
+}
+.char i:nth-child(1) { left: 18%; animation-delay: 0s; }
+.char i:nth-child(2) { left: 52%; bottom: 5px; animation-delay: 1.6s; animation-duration: 5000ms; }
+.char i:nth-child(3) { left: 81%; animation-delay: 2.9s; animation-duration: 3800ms; }
+@keyframes cuo-smoulder { 50% { opacity: 0.55; } }
+@keyframes cuo-ember-glow { 0%, 100% { opacity: 0; } 45% { opacity: 0.85; } 70% { opacity: 0.3; } }
+.cell.out .head > span, .cell.out .wl { color: #857a74; }
+.cell.out .pct, .cell.out .val { color: #c88a6c; }
+.cell.out .dot { background: #5e5450; }
+.cell.out .fill { width: 100% !important; background: linear-gradient(90deg, #4a150a, #8a2a12); box-shadow: 0 0 4px rgba(140, 40, 15, 0.6); }
+
+/* ---------- reloaded: a hit limit just reset ---------- */
+.glint { position: absolute; inset: 0; opacity: 0; }
+.cell.relit .glint {
+  background: linear-gradient(100deg, rgba(255, 230, 170, 0) 30%, rgba(255, 230, 170, 0.16) 50%, rgba(255, 230, 170, 0) 70%);
+  background-size: 250% 100%; animation: cuo-glint 1300ms ease-out 1 forwards;
+}
+.cell.relit .head > span:first-child, .cell.relit .wl { color: #f3dca0; }
+.cell.relit .fill { animation: cuo-refill 900ms cubic-bezier(0.2, 0.7, 0.2, 1) 1; transform-origin: 0 50%; }
+@keyframes cuo-glint { 0% { opacity: 1; background-position: 100% 0; } 100% { opacity: 1; background-position: 0 0; } }
+@keyframes cuo-refill { from { transform: scaleX(0); } }
 
 /* ---------- details dropdown ---------- */
 .panel {
@@ -391,22 +484,48 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .face, .flame, .fill, .bar > span { transition: none; }
-  .flame::before, .flame::after, .session.burning .fire, .session.burning .ember { animation: none; }
-  .ember { display: none; }
+  .face, .fill, .bar > span, .tint, .thrust, .session *, .weekly *, .aurora, .char { transition: none !important; }
+  .session.burning .tint { animation: none; opacity: 0.85; }
+  .aurora i, .char::before, .heat-3 .fill, .cell.relit .glint, .cell.relit .fill { animation: none !important; }
+  .char i { animation: none; opacity: 0.5; }
 }
 `;
 
   // ------------------------------------------------------------------ build
 
-  const FIRE_SVG =
-    '<svg class="fire" viewBox="0 0 24 24" aria-hidden="true">' +
-    '<defs><linearGradient id="cuo-fg" x1="0" y1="0" x2="0" y2="1">' +
-    '<stop offset="0" stop-color="#f28d00"/><stop offset="1" stop-color="#ff4d00"/>' +
-    '</linearGradient></defs>' +
-    '<path d="M12 2c.6 3.2 3.6 5.2 5 8.2 1.3 2.7.9 6-.6 8.1C15.1 20 13.7 21 12 21c-2.6 0-5-2-5.7-4.7-.6-2.3.2-4.3 1.5-5.9.4 1.2 1 2 2 2.4C9.400 9 10.200 5 12 2z" fill="url(#cuo-fg)"/>' +
-    '<path d="M12 12.500c.8 1.500 2.500 2.300 2.500 4.500 0 1.600-1.100 2.600-2.500 2.600S9.500 18.600 9.500 17.200c0-1.700 1.700-2.700 2.500-4.700z" fill="#ffe2a8"/>' +
-    '</svg>';
+  // Flame frames live in src/flame.js (generated). Built once; only one frame is visible at a time.
+  const FLAME = window.ClaudeFlame;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+  const flameFrames = [];
+  function buildThrust() {
+    const svg = svgEl('svg', {
+      class: 'thrust', viewBox: `0 0 ${FLAME.w} ${FLAME.h}`, preserveAspectRatio: 'none', 'aria-hidden': 'true',
+    });
+    const defs = svgEl('defs', {});
+    const grad = svgEl('linearGradient', { id: 'cuo-thrust', gradientUnits: 'userSpaceOnUse', x1: FLAME.w, y1: 0, x2: 0, y2: 0 });
+    // Deep red-orange at the nozzle (under the number), thinning out toward the word so both stay legible.
+    [['0', '#b82a07', '1'], ['0.4', '#cc380a', '0.95'], ['1', '#ec6218', '0.5']].forEach(([o, c, a]) =>
+      grad.appendChild(svgEl('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
+    defs.appendChild(grad);
+    // Red version for burns at 90%+ (the nozzle stays dark so the number stays readable).
+    const red = svgEl('linearGradient', { id: 'cuo-thrust-red', gradientUnits: 'userSpaceOnUse', x1: FLAME.w, y1: 0, x2: 0, y2: 0 });
+    [['0', '#9e1408', '1'], ['0.4', '#c01f0c', '0.95'], ['1', '#e04424', '0.5']].forEach(([o, c, a]) =>
+      red.appendChild(svgEl('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
+    defs.appendChild(red);
+    svg.appendChild(defs);
+    FLAME.frames.forEach((paths) => {
+      const g = svgEl('g', { class: 'f', fill: 'url(#cuo-thrust)' });
+      paths.forEach((d) => g.appendChild(svgEl('path', { d })));
+      svg.appendChild(g);
+      flameFrames.push(g);
+    });
+    return svg;
+  }
 
   const host = document.createElement('div');
   host.id = 'cuo-host';
@@ -415,27 +534,28 @@
   // session cell
   const labelEl = h('span', {}, 'session');
   const dotEl = h('i', { class: 'dot' });
-  const etaEl = h('span');
+  const etaEl = h('span', { class: 'eta' });
   const pctEl = h('span', { class: 'pct' });
-  const fireWrap = h('span');
-  fireWrap.innerHTML = FIRE_SVG;
-  const deltaEl = h('span', { class: 'delta' });
+  const auroraEl = () => h('span', { class: 'aurora' }, h('i'), h('i'), h('i'));
+  const charEl = () => h('span', { class: 'char' }, h('i'), h('i'), h('i'));
   const fillEl = h('span', { class: 'fill' });
 
   const sessionBtn = h('button', { class: 'cell session', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false' },
-    h('span', { class: 'flame', 'aria-hidden': 'true' },
-      h('i', { class: 'ember' }), h('i', { class: 'ember' }), h('i', { class: 'ember' }), h('i', { class: 'ember' })),
+    h('span', { class: 'fx', 'aria-hidden': 'true' }, auroraEl(), charEl(), h('span', { class: 'glint' }),
+      h('span', { class: 'tint' }), buildThrust()),
     h('span', { class: 'face normal' },
       h('span', { class: 'head' }, labelEl, dotEl, etaEl),
       pctEl),
-    h('span', { class: 'face burn', 'aria-hidden': 'true' }, fireWrap.firstChild, deltaEl),
     h('span', { class: 'line' }, fillEl));
 
   // weekly cell
-  const wLabelEl = h('span', {}, 'weekly');
+  const wLabelEl = h('span', { class: 'wl' }, 'weekly');
   const valEl = h('span', { class: 'val' });
+  const wFillEl = h('span', { class: 'fill' });
   const weeklyBtn = h('button', { class: 'cell weekly', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', hidden: true },
-    wLabelEl, h('span', { class: 'flip' }, valEl));
+    h('span', { class: 'fx', 'aria-hidden': 'true' }, auroraEl(), charEl(), h('span', { class: 'glint' })),
+    h('span', { class: 'flip' }, wLabelEl), valEl,
+    h('span', { class: 'line' }, wFillEl));
 
   // dropdown
   const bodyEl = h('div');
@@ -448,7 +568,7 @@
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
   const hideBtn = h('button', {
     class: 'btn', type: 'button',
-    title: 'Hide the overlay. Click the extension icon in the toolbar to bring it back.',
+    title: 'Hide the overlay. Turn it back on from the extension icon in the toolbar.',
     onclick: () => setHidden(true),
   }, 'Hide');
   const panel = h('div', { class: 'panel align-left', role: 'region', 'aria-label': 'Claude usage details', hidden: true },
@@ -461,18 +581,76 @@
 
   // ----------------------------------------------------------------- render
 
+  /** Weekly label: "weekly", or the time left while it is flipped. */
   function weeklyText() {
     const w = weeklyWindow();
     if (!w) return '';
+    if (state.weeklyView === 'out') return w.resetsAt ? `back ${U.formatResetAt(w.resetsAt)}` : 'maxed';
+    if (state.weeklyView === 'relit') return 'reloaded';
+    if (state.weeklyView > 0) return U.WARN_WORDS[state.weeklyView];
     if (state.weeklyFace === 'time' && w.resetsAt) {
       const ms = w.resetsAt.getTime() - Date.now();
       return ms > 0 ? U.formatCountdown(ms) : '…';
     }
-    return `${Math.round(w.pct)}%`;
+    return 'weekly';
+  }
+
+  function setWeeklyLabel(text) {
+    wLabelEl.textContent = text;
+    const v = state.weeklyView;
+    wLabelEl.classList.toggle('time', text !== 'weekly' && !(v > 0) && v !== 'relit');
+    setWarnClass(wLabelEl, typeof v === 'number' && text === U.WARN_WORDS[v] ? v : 0);
   }
 
   const sessionWindow = () => U.pickSession(state.parsed.windows);
   const weeklyWindow = () => U.pickWeekly(state.parsed.windows, sessionWindow());
+
+  /** Warning word schedule for one cell: shows for a few seconds now and then while heating up. */
+  function warnFor(key, level, now) {
+    const w = state.warn[key];
+    if (level < 1 || level > 3) {
+      w.level = 0; w.until = 0;
+      return 0;
+    }
+    if (level > w.level) w.next = now + CFG.warnFirstMs; // crossed a threshold: say so soon
+    w.level = level;
+    if (now >= w.next) {
+      w.until = now + CFG.warnHoldMs;
+      w.next = now + CFG.warnEveryMs;
+      schedule(CFG.warnHoldMs + 50);
+    }
+    if (now < w.until) return level;
+    schedule(w.next - now + 20);
+    return 0;
+  }
+
+  /** "Reloaded" moment: a limit that was hit has reset. */
+  function relitFor(key, out, now) {
+    if (state.lastOut[key] === true && !out) {
+      state.relitUntil[key] = now + CFG.relitMs;
+      schedule(CFG.relitMs + 50);
+    }
+    state.lastOut[key] = out;
+    return now < state.relitUntil[key];
+  }
+
+  // One pending re-render for timed effects (warning words, reloaded); the regular tick is slow.
+  let fxTimer = 0;
+  let fxAt = Infinity;
+  function schedule(ms) {
+    const at = Date.now() + Math.max(0, ms);
+    if (fxTimer && at >= fxAt) return;
+    clearTimeout(fxTimer);
+    fxAt = at;
+    fxTimer = setTimeout(() => { fxTimer = 0; fxAt = Infinity; render(); }, Math.max(0, ms));
+  }
+
+  function setHeatClass(el, level) {
+    for (let i = 1; i <= 3; i++) el.classList.toggle(`heat-${i}`, level === i);
+  }
+  function setWarnClass(el, level) {
+    for (let i = 1; i <= 3; i++) el.classList.toggle(`warn-${i}`, level === i);
+  }
 
   function renderBusy() {
     refreshBtn.classList.toggle('spin', state.fetching);
@@ -481,16 +659,44 @@
   function renderStrip(now) {
     const s = state.status === 'ok' ? sessionWindow() : null;
 
+    const wRaw = s ? weeklyWindow() : null;
+    const weeklyOut = !!wRaw && U.heatLevel(wRaw.pct) === 4;
+    const burningNow = !!(state.burn && s);
+    let sessionOut = false;
+    let sLevel = 0;
+    let sWarn = 0;
+    let sRelit = false;
+
     if (s) {
       const pct = Math.round(s.pct);
       const ms = s.resetsAt ? s.resetsAt.getTime() - now : null;
       const eta = ms == null ? '' : ms > 0 ? U.formatCountdown(ms) : 'resetting';
-      labelEl.textContent = U.shortLabel(s);
-      etaEl.textContent = eta;
-      etaEl.hidden = dotEl.hidden = !eta;
+      sLevel = U.heatLevel(s.pct);
+      sessionOut = sLevel === 4;
+      // If the weekly limit is hit, that is what blocks you: session goes on hold, weekly shows when it's back.
+      const blocked = sessionOut || weeklyOut;
+      sRelit = relitFor('session', blocked, now);
+      sWarn = blocked || burningNow ? 0 : warnFor('session', sLevel, now);
+      let label = U.shortLabel(s);
+      let sub = eta;
+      if (weeklyOut) {
+        label = 'on hold'; sub = ''; // the weekly cell says when it's back
+      } else if (sessionOut) {
+        label = ms != null && ms > 0 ? 'back in' : 'resetting'; sub = ms != null && ms > 0 ? eta : '';
+      } else if (sRelit) {
+        label = 'reloaded'; sub = '';
+      } else if (sWarn) {
+        label = U.WARN_WORDS[sWarn]; sub = '';
+      }
+      labelEl.textContent = label;
+      setWarnClass(labelEl, sWarn);
+      etaEl.textContent = sub;
+      etaEl.hidden = dotEl.hidden = !sub;
       pctEl.textContent = `${pct}%`;
-      fillEl.style.width = `${s.pct}%`;
-      const aria = `${U.shortLabel(s)} usage ${pct}%` + (eta ? `, resets in ${eta}` : '') + '. Show details.';
+      fillEl.style.width = `${Math.min(100, s.pct)}%`;
+      const aria = `${U.shortLabel(s)} usage ${pct}%` + (sessionOut ? ', limit reached' : '')
+        + (weeklyOut && wRaw.resetsAt ? `, weekly limit reached, back ${U.formatResetAt(wRaw.resetsAt, now)}` : eta ? `, resets in ${eta}` : '')
+        + '. Show details.';
       sessionBtn.setAttribute('aria-label', aria);
       sessionBtn.title = '';
     } else {
@@ -498,23 +704,61 @@
       labelEl.textContent = loading ? 'session' : 'usage';
       etaEl.hidden = dotEl.hidden = true;
       pctEl.textContent = loading ? '…' : '–';
+      setWarnClass(labelEl, 0);
       fillEl.style.width = '0';
       const msg = loading ? 'Loading usage' : 'Usage unavailable';
       sessionBtn.setAttribute('aria-label', `${msg}. Show details.`);
       sessionBtn.title = msg;
     }
 
-    const w = s ? weeklyWindow() : null;
+    const w = wRaw;
     weeklyBtn.hidden = !w;
+    let wLevel = 0;
     if (w) {
       if (!w.resetsAt && state.weeklyFace === 'time') state.weeklyFace = 'pct';
-      if (!state.flipping) valEl.textContent = weeklyText();
+      wLevel = U.heatLevel(w.pct);
+      const wRelit = relitFor('weekly', wLevel === 4, now);
+      const wWarn = wLevel === 4 ? 0 : warnFor('weekly', wLevel, now);
+      const view = wLevel === 4 ? 'out' : wRelit ? 'relit' : wWarn || 0;
+      const changed = view !== state.weeklyView;
+      state.weeklyView = view;
+      valEl.textContent = `${Math.round(w.pct)}%`;
+      wFillEl.style.width = `${Math.min(100, w.pct)}%`;
+      setHeatClass(weeklyBtn, wLevel);
+      weeklyBtn.classList.toggle('out', wLevel === 4);
+      weeklyBtn.classList.toggle('relit', wRelit);
+      if (changed && !state.flipping && view !== 'out') flipLabel(weeklyText());
+      else if (!state.flipping) setWeeklyLabel(weeklyText());
       const reset = w.resetsAt ? `, resets in ${U.formatCountdown(w.resetsAt.getTime() - now)}` : '';
       weeklyBtn.setAttribute('aria-label', `weekly usage ${Math.round(w.pct)}%${reset}. Show details.`);
     }
 
-    sessionBtn.classList.toggle('burning', !!state.burn);
-    if (state.burn) deltaEl.textContent = `+${state.burn.delta}%`;
+    const burning = burningNow;
+    setHeatClass(sessionBtn, burning ? 0 : sLevel);
+    sessionBtn.classList.toggle('out', !burning && (sessionOut || weeklyOut));
+    sessionBtn.classList.toggle('relit', !burning && sRelit);
+    sessionBtn.classList.toggle('hot', burning && s.pct >= 90);
+
+    // Northern-lights glow while either limit is 90-99%.
+    const near = [s, w].filter((x) => x && U.heatLevel(x.pct) < 4).map((x) => x.pct);
+    const q = near.length ? Math.max(...near.map(U.auroraStrength)) : 0;
+    const glowOn = near.some((p) => p >= 90);
+    rootEl.classList.toggle('aurora-on', glowOn);
+    if (glowOn) {
+      rootEl.style.setProperty('--q', q.toFixed(3));
+      rootEl.style.setProperty('--heat', U.heatRgb(q));
+    }
+    sessionBtn.classList.toggle('burning', burning);
+    sessionBtn.classList.toggle('fading', burning && state.burn.fading);
+    if (burning) {
+      sessionBtn.style.setProperty('--p', String(U.burnPower(state.burn.delta)));
+      labelEl.textContent = state.burn.word;
+      setWarnClass(labelEl, 0);
+      pctEl.textContent = `+${state.burn.delta}%`;
+    }
+    // During a burn only the word and +N% show; the countdown comes back afterwards.
+    if (burning) etaEl.hidden = dotEl.hidden = true;
+    setThrust(burning, burning ? U.burnPower(state.burn.delta) : 0);
   }
 
   function barRow(win, now) {
@@ -574,11 +818,55 @@
     setTimeout(() => { live.textContent = text; }, 50);
   }
 
-  function burn(delta) {
-    const total = (state.burn ? state.burn.delta : 0) + delta;
-    if (state.burn) clearTimeout(state.burn.timer);
-    state.burn = { delta: total, timer: setTimeout(endBurn, CFG.burnHoldMs) };
+  let thrustTimer = 0;
+  let thrustMs = 0;
+  let frameIdx = 0;
+  function showFrame(i) {
+    flameFrames.forEach((g, n) => g.classList.toggle('on', n === i));
+  }
+  /** Runs the frame loop only while the burn is on screen; static frame under reduced motion. */
+  function setThrust(on, power = 0) {
+    // Bigger burns flicker faster; restart the loop if the power changed (stacked burns).
+    const ms = Math.round(CFG.flameFrameMs - 30 * power);
+    if (on && thrustTimer > 0 && ms !== thrustMs) setThrust(false);
+    if (on && !thrustTimer) {
+      thrustMs = ms;
+      if (reducedMotion) {
+        showFrame(4);
+        thrustTimer = -1;
+      } else {
+        showFrame(frameIdx);
+        thrustTimer = setInterval(() => {
+          frameIdx = (frameIdx + 1) % flameFrames.length;
+          showFrame(frameIdx);
+        }, ms);
+      }
+    } else if (!on && thrustTimer) {
+      if (thrustTimer > 0) clearInterval(thrustTimer);
+      thrustTimer = 0;
+    }
+  }
+
+  function burn(delta, opts = {}) {
+    // A burn that arrives while the previous one is dying out starts a fresh burst.
+    const fresh = opts.fresh || !state.burn || state.burn.fading;
+    const total = (fresh ? 0 : state.burn.delta) + delta;
+    if (state.burn) { clearTimeout(state.burn.timer); clearTimeout(state.burn.fadeTimer); }
+    state.burn = {
+      delta: total,
+      word: opts.word || U.pickBurnWord(total),
+      fading: false,
+      timer: setTimeout(fadeBurn, CFG.burnHoldMs),
+      fadeTimer: 0,
+    };
     announce(`Session usage up ${total}%`);
+    render();
+  }
+
+  function fadeBurn() {
+    if (!state.burn) return;
+    state.burn.fading = true;
+    state.burn.fadeTimer = setTimeout(endBurn, reducedMotion ? 0 : CFG.burnFadeMs);
     render();
   }
 
@@ -589,9 +877,9 @@
 
   // ------------------------------------------------------------- weekly flip
 
-  function flipValue(text) {
-    if (reducedMotion || typeof valEl.animate !== 'function') {
-      valEl.textContent = text;
+  function flipLabel(text) {
+    if (reducedMotion || typeof wLabelEl.animate !== 'function') {
+      setWeeklyLabel(text);
       return;
     }
     state.flipping = true;
@@ -605,19 +893,19 @@
       clearTimeout(safety);
       anims.forEach((a) => { try { a.cancel(); } catch (e) { /* ignore */ } });
       state.flipping = false;
-      valEl.textContent = weeklyText();
+      setWeeklyLabel(weeklyText());
     };
     const safety = setTimeout(finish, 800);
 
-    const out = valEl.animate(
+    const out = wLabelEl.animate(
       [{ transform: 'rotateX(0deg)', opacity: 1 }, { transform: 'rotateX(-90deg)', opacity: 0 }],
       { duration: 140, easing: 'ease-in', fill: 'forwards' });
     anims.push(out);
     out.onfinish = () => {
       if (done) return;
-      valEl.textContent = text;
+      setWeeklyLabel(text);
       out.cancel();
-      const back = valEl.animate(
+      const back = wLabelEl.animate(
         [{ transform: 'rotateX(90deg)', opacity: 0 }, { transform: 'rotateX(0deg)', opacity: 1 }],
         { duration: 180, easing: 'ease-out' });
       anims.push(back);
@@ -627,7 +915,7 @@
 
   function setWeeklyFace(face) {
     state.weeklyFace = face;
-    flipValue(weeklyText());
+    flipLabel(weeklyText());
   }
 
   let flipTimer = null;
@@ -635,7 +923,7 @@
     clearTimeout(flipTimer);
     flipTimer = setTimeout(() => {
       const w = weeklyWindow();
-      if (!state.hidden && document.visibilityState === 'visible' && w && w.resetsAt) {
+      if (!state.hidden && document.visibilityState === 'visible' && w && w.resetsAt && !state.weeklyView) {
         setWeeklyFace('time');
         flipTimer = setTimeout(() => {
           setWeeklyFace('pct');
@@ -763,6 +1051,70 @@
   // while the page animates, e.g. the sidebar sliding open).
   let sepCache = null;
   let scanDue = true;
+  let itemsDue = true;
+  let bounds = null;
+
+  // ---- keep the strip clear of the header's title and buttons -------------------------
+  // Only the header's own controls count: the chat title (with its chevron) and breadcrumb
+  // links on the left, and buttons like "Share" on the right. The conversation scrolls under
+  // claude.ai's see-through header, so anything that scrolls is ignored; that keeps the strip
+  // still while you scroll.
+  const CTRL = 'button, a[href], [role="button"], [aria-haspopup], input, select';
+  function isPageContent(el) {
+    for (let e = el, i = 0; e && i < 40; e = e.parentElement, i++) {
+      if (e === document.body || e === document.documentElement) break;
+      const cs = getComputedStyle(e);
+      // a pinned, header-sized bar (sticky/fixed) is header, wherever it sits
+      if ((cs.position === 'fixed' || cs.position === 'sticky') && e.getBoundingClientRect().height <= 90) return false;
+      if (/(auto|scroll|overlay)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1) return true;
+    }
+    const se = document.scrollingElement;
+    return !!se && se.scrollHeight > window.innerHeight + 1;
+  }
+
+  // A side panel on the right (artifact/file viewer): a tall block reaching the window's right
+  // edge that starts to the right of the composer. The strip stays left of it.
+  function chatColumn(axis) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let panelLeft = vw;
+    let el = document.elementFromPoint(vw - 12, Math.round(vh * 0.5));
+    for (let i = 0; el && i < 25 && el !== document.body && el !== document.documentElement; el = el.parentElement, i++) {
+      const r = el.getBoundingClientRect();
+      if (r.left > axis && r.right >= vw - 2 && r.height >= vh * 0.6) panelLeft = Math.min(panelLeft, r.left);
+    }
+    // The sidebar on the left: a tall block from the window's left edge that ends before the
+    // composer. Its own top buttons (logo, new chat) are not part of the chat header.
+    let sideRight = 0;
+    el = document.elementFromPoint(12, Math.round(vh * 0.5));
+    for (let i = 0; el && i < 25 && el !== document.body && el !== document.documentElement; el = el.parentElement, i++) {
+      const r = el.getBoundingClientRect();
+      if (r.left <= 2 && r.right < axis && r.height >= vh * 0.6) sideRight = Math.max(sideRight, r.right);
+    }
+    return { l: sideRight, r: panelLeft };
+  }
+
+  function measureBounds(axis) {
+    const col = chatColumn(axis);
+    let left = col.l;
+    let right = col.r;
+    const ctrls = [];
+    for (const el of document.querySelectorAll(CTRL)) {
+      if (host.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || r.top < -2 || r.bottom > 70 || r.height < 10 || r.height > 60) continue;
+      if (r.right <= col.l || r.left >= col.r) continue; // sidebar or side panel
+      if (el.parentElement && el.parentElement.closest(CTRL)) continue; // part of a bigger control
+      if (isPageContent(el)) continue;
+      const label = (el.textContent || '').trim();
+      ctrls.push({ l: r.left, r: r.right, btn: !!label && label.length <= 16 && r.width < 160 });
+    }
+    const { lastLeft, firstRight } = U.splitHeader(ctrls, col.r, axis);
+    if (lastLeft != null) left = Math.max(left, lastLeft); // title + chevron: stay right of them
+    if (firstRight != null) right = Math.min(right, firstRight); // header buttons: stay left of them
+    return { left, right };
+  }
+
   function layout() {
     const axis = findAxis();
     observe(composerRef);
@@ -773,7 +1125,14 @@
     const sep = sepCache;
     const h = sep ? round2(sep.bottom) : FALLBACK_H;
     const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
-    const left = U.centeredLeft(axis, rootEl.offsetWidth || 330, window.innerWidth, EDGE);
+    const width = rootEl.offsetWidth || 330;
+    if (itemsDue) {
+      bounds = measureBounds(axis);
+      itemsDue = false;
+    }
+    // Centred on the composer, nudged right past the title, never into the buttons or panel.
+    const centered = U.centeredLeft(axis, width, window.innerWidth, EDGE);
+    const left = U.placeBetween(centered, width, bounds.left, bounds.right, EDGE);
     let changed = false;
 
     if (left !== layoutCache.left) {
@@ -806,6 +1165,7 @@
     if (calm < 30) frame = requestAnimationFrame(pump); // ~0.5s of calm, then sleep
   }
   function kick(scan = true) {
+    itemsDue = true;
     if (scan) scanDue = true;
     calm = 0;
     if (!frame) frame = requestAnimationFrame(pump);

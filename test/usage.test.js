@@ -198,3 +198,136 @@ test('formatAgo', () => {
   assert.equal(U.formatAgo(42 * 1000), '42s ago');
   assert.equal(U.formatAgo(3 * 60 * 1000), '3m ago');
 });
+
+test('burn word pool is locked per tier', () => {
+  const tiers = U.BURN_WORDS.map((t) => t.words.join(' '));
+  assert.deepEqual(tiers, [
+    'sparked sizzled noice tidy neat clean burnt crisp cute',
+    'toasted scorched torched blazed solid sheesh bussin cooked smooth',
+    'blasted kaboom ouch daammn yowza banger',
+    'nuked wildfire lessgoo massive absurd',
+    'shattered legend godmode cinema',
+  ]);
+});
+
+test('burn word tier boundaries', () => {
+  const first = () => 0;
+  const pool = (i) => U.BURN_WORDS[i].words;
+  assert.equal(U.pickBurnWord(1, first), pool(0)[0]);
+  assert.equal(U.pickBurnWord(2, first), pool(1)[0]);
+  assert.equal(U.pickBurnWord(7, first), pool(1)[0]);
+  assert.equal(U.pickBurnWord(8, first), pool(2)[0]);
+  assert.equal(U.pickBurnWord(15, first), pool(2)[0]);
+  assert.equal(U.pickBurnWord(16, first), pool(3)[0]);
+  assert.equal(U.pickBurnWord(40, first), pool(3)[0]);
+  assert.equal(U.pickBurnWord(41, first), pool(4)[0]);
+  assert.equal(U.pickBurnWord(100, first), pool(4)[0]);
+});
+
+test('burn word picks across the whole tier and tolerates rng edges', () => {
+  const last = (i) => U.BURN_WORDS[i].words[U.BURN_WORDS[i].words.length - 1];
+  assert.equal(U.pickBurnWord(3, () => 0.999999), last(1));
+  assert.equal(U.pickBurnWord(3, () => 1), last(1)); // rng must not index out of range
+  const seen = new Set();
+  for (let n = 0; n < 9; n++) seen.add(U.pickBurnWord(1, () => n / 9));
+  assert.equal(seen.size, 9);
+});
+
+test('burn word falls back to the smallest tier for odd input', () => {
+  for (const bad of [0, -3, NaN, undefined]) {
+    assert.ok(U.BURN_WORDS[0].words.includes(U.pickBurnWord(bad)));
+  }
+});
+
+test('burn power steps up with the tier', () => {
+  assert.equal(U.burnPower(1), 0);
+  assert.equal(U.burnPower(2), 0.25);
+  assert.equal(U.burnPower(7), 0.25);
+  assert.equal(U.burnPower(8), 0.5);
+  assert.equal(U.burnPower(16), 0.75);
+  assert.equal(U.burnPower(41), 1);
+  assert.equal(U.burnPower(500), 1);
+  assert.equal(U.burnPower(NaN), 0);
+});
+
+
+
+
+
+
+
+
+
+test('heatLevel thresholds', () => {
+  const cases = [[0, 0], [79.9, 0], [80, 1], [89.9, 1], [90, 2], [94.9, 2], [95, 3], [99.4, 3], [99.5, 4], [100, 4], [130, 4], [NaN, 0]];
+  for (const [pct, lvl] of cases) assert.equal(U.heatLevel(pct), lvl, `pct ${pct}`);
+  assert.deepEqual(U.WARN_WORDS.slice(1), ['running hot', 'redline', 'last drop']);
+});
+
+test('auroraStrength ramps from 90 to 100', () => {
+  assert.equal(U.auroraStrength(89.9), 0);
+  assert.equal(U.auroraStrength(90), 0);
+  assert.equal(U.auroraStrength(95), 0.5);
+  assert.equal(U.auroraStrength(100), 1);
+  assert.equal(U.auroraStrength(120), 1);
+  assert.equal(U.auroraStrength(NaN), 0);
+});
+
+test('heatRgb goes from amber to red', () => {
+  assert.equal(U.heatRgb(0), '255, 160, 40');
+  assert.equal(U.heatRgb(1), '240, 50, 35');
+  assert.equal(U.heatRgb(5), '240, 50, 35');
+});
+
+test('formatResetAt: time only when soon, weekday when further out', () => {
+  const now = new Date(2026, 10, 25, 9, 0).getTime();
+  const soon = U.formatResetAt(new Date(2026, 10, 25, 21, 40), now, 'en-US');
+  assert.equal(soon, '9:40 PM');
+  const later = U.formatResetAt(new Date(2026, 10, 27, 9, 0), now, 'en-US');
+  assert.equal(later, 'Fri 9 AM');
+});
+
+
+test('placeBetween: centred when the title is short', () => {
+  assert.equal(U.placeBetween(579, 338, 450, 1121), 579);
+});
+
+test('placeBetween: slides right past a long title (incl. its chevron)', () => {
+  assert.equal(U.placeBetween(579, 338, 700, 1121), 712);
+});
+
+test('placeBetween: never runs into the buttons or a side panel', () => {
+  assert.equal(U.placeBetween(800, 338, 450, 1121), 1121 - 12 - 338);
+  // gap too narrow: stay off the buttons, title end goes under
+  assert.equal(U.placeBetween(579, 338, 833, 1121), 771);
+});
+
+test('splitHeader: title chevron past the middle still counts as the title', () => {
+  // breadcrumb, title, chevron (631..660), then Step / Share far right
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 630 }, { l: 631, r: 660 }, { l: 866, r: 960 }, { l: 975, r: 1040 }];
+  assert.deepEqual(U.splitHeader(c), { lastLeft: 660, firstRight: 866 });
+});
+
+test('splitHeader: no right-side buttons (side panel open) -> all left', () => {
+  const c = [{ l: 120, r: 160 }, { l: 196, r: 330 }, { l: 340, r: 630 }, { l: 631, r: 660 }];
+  assert.deepEqual(U.splitHeader(c), { lastLeft: 660, firstRight: null });
+});
+
+test('splitHeader: empty', () => {
+  assert.deepEqual(U.splitHeader([]), { lastLeft: null, firstRight: null });
+});
+
+test('splitHeader: long title pressed against the buttons -> trailing text buttons are the right group', () => {
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 720 }, { l: 720, r: 735 }, { l: 735, r: 820, btn: true }, { l: 836, r: 884, btn: true }];
+  assert.deepEqual(U.splitHeader(c, 900), { lastLeft: 735, firstRight: 735 });
+});
+
+test('splitHeader: side panel, title + icon chevron near the panel edge -> all left', () => {
+  const c = [{ l: 196, r: 330 }, { l: 340, r: 583 }, { l: 583, r: 596 }];
+  assert.deepEqual(U.splitHeader(c, 612), { lastLeft: 596, firstRight: null });
+});
+
+test('splitHeader: widest gap is sidebar icons | breadcrumb (panel open) -> not a split', () => {
+  const c = [{ l: 35, r: 60 }, { l: 145, r: 205 }, { l: 265, r: 430 }, { l: 440, r: 530 }, { l: 530, r: 545 }];
+  assert.deepEqual(U.splitHeader(c, 690, 520), { lastLeft: 545, firstRight: null });
+});
