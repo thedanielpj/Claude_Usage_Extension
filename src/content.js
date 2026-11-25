@@ -1018,7 +1018,6 @@
 
     const infos = [];
     const band = [];
-    bandEls = band;
     for (const el of cands) {
       if (el === host || el === document.documentElement || el === document.body) continue;
       const r = el.getBoundingClientRect();
@@ -1057,139 +1056,55 @@
   let sepCache = null;
   let scanDue = true;
   let itemsDue = true;
-  let bandEls = [];
-  let headerItems = [];
-  let headerBox = { l: 0, r: window.innerWidth };
+  let bounds = null;
 
-  // What the page header already shows (chat title text, buttons, icons), as horizontal
-  // extents, so the strip can slide right instead of covering a long title.
-  const CTL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"], img, svg';
-  // A real button is small with a short label ("Share", "Step 3 of 5"). A long label (the
-  // renamable chat title, a breadcrumb link) is text the strip may cover if it must.
-  // An icon inside a button or link (like the chevron next to the chat title) belongs to it.
-  const BTN_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"]';
-  const controlOf = (el) => el.closest(BTN_SELECTOR) || el.closest('img, svg');
-  const isButton = (el, r) => r.width < 160 && (el.textContent || '').trim().length <= 16;
-  // The conversation scrolls underneath claude.ai's see-through header, so anything that
-  // scrolls is page content, not header. Keeps the strip's position independent of scrolling.
-  function scrolls(el) {
-    const docScrolls = document.scrollingElement && document.scrollingElement.scrollHeight > window.innerHeight + 1;
-    let pinned = false;
-    for (let e = el, i = 0; e && i < 30; e = e.parentElement, i++) {
+  // ---- keep the strip clear of the header's title and buttons -------------------------
+  // Only the header's own controls count: the chat title (with its chevron) and breadcrumb
+  // links on the left, and buttons like "Share" on the right. The conversation scrolls under
+  // claude.ai's see-through header, so anything that scrolls is ignored; that keeps the strip
+  // still while you scroll.
+  const CTRL = 'button, a[href], [role="button"], [aria-haspopup], input, select';
+  function isPageContent(el) {
+    for (let e = el, i = 0; e && i < 40; e = e.parentElement, i++) {
       if (e === document.body || e === document.documentElement) break;
       const cs = getComputedStyle(e);
-      if (cs.position === 'fixed' || cs.position === 'sticky') pinned = true;
-      if (/(auto|scroll|overlay)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1) return !pinned;
+      // a pinned, header-sized bar (sticky/fixed) is header, wherever it sits
+      if ((cs.position === 'fixed' || cs.position === 'sticky') && e.getBoundingClientRect().height <= 90) return false;
+      if (/(auto|scroll|overlay)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1) return true;
     }
-    return docScrolls && !pinned;
-  }
-  function headerRoots(h) {
-    const roots = bandEls.filter((e) => e.isConnected && !scrolls(e) && e.getBoundingClientRect().bottom <= h + 6);
-    return roots.filter((e) => !roots.some((o) => o !== e && o.contains(e)));
+    const se = document.scrollingElement;
+    return !!se && se.scrollHeight > window.innerHeight + 1;
   }
 
-  function measureHeaderItems(h) {
-    const out = [];
+  // A side panel on the right (artifact/file viewer): a tall block reaching the window's right
+  // edge that starts to the right of the composer. The strip stays left of it.
+  function chatColumn(axis) {
     const vw = window.innerWidth;
-    const inBand = (r) => r.width > 0 && r.height > 0 && r.bottom > 2 && r.top < h - 2;
-    const visible = (el) => !el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true });
-    let budget = 3000; // cap the work on very large headers
-    const range = document.createRange();
-    for (const bandEl of headerRoots(h)) {
-      const walker = document.createTreeWalker(bandEl, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
-      for (let n = walker.nextNode(); n && budget > 0; n = walker.nextNode(), budget--) {
-        if (n.nodeType === 3) {
-          if (!n.nodeValue.trim()) continue;
-          const parent = n.parentElement;
-          if (!parent || host.contains(parent) || !visible(parent)) continue;
-          range.selectNodeContents(n);
-          const r = range.getBoundingClientRect();
-          if (inBand(r)) {
-            // only the visible part: titles are often cut off with an ellipsis
-            let l = r.left;
-            let rr = r.right;
-            for (let el = parent, i = 0; el && i < 6 && el !== document.body; el = el.parentElement, i++) {
-              if (getComputedStyle(el).overflowX !== 'visible') {
-                const b = el.getBoundingClientRect();
-                l = Math.max(l, b.left);
-                rr = Math.min(rr, b.right);
-              }
-            }
-            if (rr > l) out.push({ l, r: rr, ctl: false });
-          }
-        } else if (n.matches(CTL_SELECTOR) && controlOf(n) === n && !host.contains(n) && visible(n)) {
-          const r = n.getBoundingClientRect();
-          // a control stretched across most of the header is a layout wrapper, not a button
-          // a wide control (e.g. the renamable chat title) is text to avoid, not a button to stay off
-          if (inBand(r) && r.width < vw * 0.6) out.push({ l: r.left, r: r.right, ctl: isButton(n, r) });
-        }
-      }
+    const vh = window.innerHeight;
+    let panelLeft = vw;
+    let el = document.elementFromPoint(vw - 12, Math.round(vh * 0.5));
+    for (let i = 0; el && i < 25 && el !== document.body && el !== document.documentElement; el = el.parentElement, i++) {
+      const r = el.getBoundingClientRect();
+      if (r.left > axis && r.right >= vw - 2 && r.height >= vh * 0.6) panelLeft = Math.min(panelLeft, r.left);
     }
-    return out;
+    return { l: 0, r: panelLeft };
   }
 
-  // Second, structure-free look at the header: hit-test a line across its middle (with the
-  // strip itself made see-through for the moment) and record where there is visible text or
-  // a button. Catches titles the DOM walk misses, and respects text clipped with an ellipsis.
-  const STEP = 4;
-  function sampleHeader(h, from, to) {
-    const y = Math.max(4, Math.round((h - 1) / 2));
-    // claude.ai's header is see-through: the conversation scrolls underneath it. Only count
-    // what belongs to the header bar itself (elements that end within the header band).
-    const roots = headerRoots(h);
-    if (!roots.length) return [];
-    const inHeader = (el) => roots.some((r) => r.contains(el));
-    const runs = [];
-    let cur = null;
-    const prev = host.style.pointerEvents;
-    host.style.pointerEvents = 'none';
-    try {
-      for (let x = Math.max(1, from); x < to; x += STEP) {
-        let kind = null;
-        const el = document.elementFromPoint(x, y);
-        if (el && el !== document.body && el !== document.documentElement && inHeader(el)) {
-          const c = controlOf(el);
-          const cr = c && c.getBoundingClientRect();
-          // small controls are buttons to stay off; a wide one (like a renamable title) counts as text
-          if (cr && isButton(c, cr)) kind = 'ctl';
-          else if (document.caretRangeFromPoint) {
-            const r = document.caretRangeFromPoint(x, y);
-            const n = r && r.startContainer;
-            if (n && n.nodeType === 3 && n.nodeValue.trim()) {
-              const rg = document.createRange();
-              const o = r.startOffset;
-              for (const [a, b] of [[o, o + 1], [o - 1, o]]) {
-                if (a < 0 || b > n.nodeValue.length) continue;
-                rg.setStart(n, a);
-                rg.setEnd(n, b);
-                const box = rg.getBoundingClientRect();
-                if (box.width && x >= box.left - STEP && x <= box.right + STEP && box.bottom > 2 && box.top < h) {
-                  kind = 'text';
-                  break;
-                }
-              }
-            }
-          }
-        }
-        if (kind && cur && cur.kind === kind && x - cur.r <= STEP * 3) cur.r = x;
-        else if (kind) runs.push((cur = { kind, l: x, r: x }));
-      }
-    } finally {
-      host.style.pointerEvents = prev;
+  function measureBounds(axis) {
+    const col = chatColumn(axis);
+    let left = col.l;
+    let right = col.r;
+    for (const el of document.querySelectorAll(CTRL)) {
+      if (host.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || r.top < -2 || r.bottom > 70 || r.height < 10 || r.height > 60) continue;
+      if (r.right <= col.l || r.left >= col.r) continue; // sidebar or side panel
+      if (el.parentElement && el.parentElement.closest(CTRL)) continue; // part of a bigger control
+      if (isPageContent(el)) continue;
+      if (r.left < axis) left = Math.max(left, r.right); // title, breadcrumb: stay right of them
+      else right = Math.min(right, r.left); // header buttons: stay left of them
     }
-    return runs.map((u) => ({ l: u.l - STEP / 2, r: u.r + STEP / 2, ctl: u.kind === 'ctl' }));
-  }
-
-  // The header strip the chat column sits under: with a side panel open, claude.ai's header
-  // only spans the chat column, so the strip should stay inside it.
-  function headerBounds(axis, h) {
-    const vw = window.innerWidth;
-    let best = null;
-    for (const e of headerRoots(h)) {
-      const r = e.getBoundingClientRect();
-      if (r.top <= 4 && r.left <= axis && r.right >= axis && r.width >= 300 && (!best || r.width < best.width)) best = r; // the chat column's own header, not a full-width wrapper
-    }
-    return best ? { l: Math.max(0, best.left), r: Math.min(vw, best.right) } : { l: 0, r: vw };
+    return { left, right };
   }
 
   function layout() {
@@ -1204,19 +1119,12 @@
     const bw = round2(Math.max(sep ? sep.bw : 1, 1 / dpr()));
     const width = rootEl.offsetWidth || 330;
     if (itemsDue) {
-      headerBox = headerBounds(axis, h);
-      headerItems = measureHeaderItems(h).concat(sampleHeader(h, headerBox.l, headerBox.r));
+      bounds = measureBounds(axis);
       itemsDue = false;
     }
-    // Centred on the composer; if that would sit on the chat title or buttons, slide right.
+    // Centred on the composer, nudged right past the title, never into the buttons or panel.
     const centered = U.centeredLeft(axis, width, window.innerWidth, EDGE);
-    // Work in the chat header's own coordinates so the strip stays inside it (side panel open).
-    const bx = headerBox.l;
-    const local = headerItems
-      .filter((i) => i.r > headerBox.l && i.l < headerBox.r) // ignore a side panel's own header
-      .map((i) => ({ l: Math.max(0, i.l - bx), r: Math.min(headerBox.r, i.r) - bx, ctl: i.ctl }));
-    const start = Math.min(Math.max(centered, bx + EDGE), headerBox.r - width - EDGE) - bx;
-    const left = bx + U.placeOverlay(local, start, width, headerBox.r - bx, EDGE);
+    const left = U.placeBetween(centered, width, bounds.left, bounds.right, EDGE);
     let changed = false;
 
     if (left !== layoutCache.left) {

@@ -195,52 +195,15 @@
   }
 
   /**
-   * Left edge for the strip so it doesn't sit on top of the page header's content.
-   *
-   * items: [{l, r, ctl}] horizontal extents of what the header already shows (ctl = a
-   * button/link/icon, otherwise text such as the chat title). `centered` is where the
-   * strip wants to be. It stays there if the spot is clear; otherwise it slides right to
-   * the first clear spot. If there is no fully clear spot, it stays off the buttons and covers
-   * as little text as it can (usually: slid right up to the buttons); the rest of the title
-   * runs underneath (fine).
+   * Left edge for the strip between the header's title (left bound) and its buttons or a side
+   * panel (right bound). Stays centred if that fits, else slides right past the title. If the
+   * gap is too narrow for both, it stays off the buttons and the end of the title goes under.
    */
-  function placeOverlay(items, centered, width, viewportWidth, edge = 8, gap = 12) {
-    const maxLeft = Math.max(edge, viewportWidth - width - edge);
-    const hits = (p, list) => list.filter((i) => i.r > p - gap && i.l < p + width + gap);
-
-    let p = centered;
-    for (let n = 0; n <= items.length; n++) {
-      const h = hits(p, items);
-      if (!h.length) {
-        if (p <= maxLeft) return Math.round(p);
-        break;
-      }
-      p = Math.max(...h.map((i) => i.r)) + gap;
-      if (p > maxLeft) break;
-    }
-
-    // No fully clear spot: stay off the buttons and cover as little text as possible (slide
-    // right where that helps; only move left of centre to get off a button), further right on ties.
-    const ctl = items.filter((i) => i.ctl);
-    // text covered = overlap with the union of text extents (items can repeat or nest)
-    const text = [];
-    for (const i of items.filter((x) => !x.ctl).sort((a, b) => a.l - b.l)) {
-      const last = text[text.length - 1];
-      if (last && i.l <= last.r) last.r = Math.max(last.r, i.r);
-      else text.push({ l: i.l, r: i.r });
-    }
-    const overlap = (c) => text.reduce((sum, i) => sum + Math.max(0, Math.min(i.r + gap, c + width) - Math.max(i.l - gap, c)), 0);
-    const cands = [centered, maxLeft, ...text.map((i) => i.r + gap), ...ctl.map((i) => i.r + gap)]
-      .filter((c) => c >= centered)
-      .concat(ctl.map((i) => i.l - gap - width))
-      .filter((c) => c >= edge && c <= maxLeft && !hits(c, ctl).length);
-    let best = null;
-    for (const c of cands) {
-      const o = overlap(c);
-      // ties go right: better to cover the end of a long title than its start
-      if (!best || o < best.o - 0.5 || (Math.abs(o - best.o) <= 0.5 && c > best.c)) best = { c, o };
-    }
-    return Math.round(best ? best.c : centered);
+  function placeBetween(centered, width, left, right, edge = 8, gap = 12) {
+    const lo = left + gap;
+    const hi = right - gap - width;
+    if (hi >= lo) return Math.round(Math.min(Math.max(centered, lo), hi));
+    return Math.round(Math.max(edge, hi));
   }
 
   /**
@@ -316,7 +279,7 @@
     primaryWindow,
     pickSeparator,
     centeredLeft,
-    placeOverlay,
+    placeBetween,
     pickSession,
     pickWeekly,
     shortLabel,

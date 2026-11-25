@@ -250,59 +250,13 @@ test('burn power steps up with the tier', () => {
   assert.equal(U.burnPower(NaN), 0);
 });
 
-test('placeOverlay: stays centred when the header is clear', () => {
-  assert.equal(U.placeOverlay([], 350, 300, 1000), 350);
-  // title ends well before the strip starts
-  assert.equal(U.placeOverlay([{ l: 100, r: 300, ctl: false }], 350, 300, 1000), 350);
-});
 
-test('placeOverlay: slides right past a long title', () => {
-  // title runs to x=420; strip needs 12px of air after it
-  assert.equal(U.placeOverlay([{ l: 100, r: 420, ctl: false }], 350, 300, 1000), 432);
-  // a title that only touches the strip's margin still moves it
-  assert.equal(U.placeOverlay([{ l: 100, r: 345, ctl: false }], 350, 300, 1000), 357);
-});
 
-test('placeOverlay: chains past several items', () => {
-  const items = [
-    { l: 100, r: 420, ctl: false },
-    { l: 436, r: 480, ctl: true }, // a button right after the title
-  ];
-  assert.equal(U.placeOverlay(items, 350, 300, 1000), 492);
-});
 
-test('placeOverlay: no room on the right -> hug the buttons, let the title go under', () => {
-  const items = [
-    { l: 100, r: 700, ctl: false }, // very long title
-    { l: 880, r: 960, ctl: true }, // share button
-  ];
-  // furthest right that still clears the button: 880 - 12 - 300
-  assert.equal(U.placeOverlay(items, 350, 300, 1000), 568);
-});
 
-test('placeOverlay: no room and nothing to dodge on the right -> viewport edge', () => {
-  assert.equal(U.placeOverlay([{ l: 100, r: 900, ctl: false }], 350, 300, 1000), 692);
-});
 
-test('placeOverlay: falls back to centred when buttons leave no room at all', () => {
-  const items = [
-    { l: 100, r: 700, ctl: false },
-    { l: 8, r: 500, ctl: true },
-    { l: 510, r: 990, ctl: true },
-  ];
-  assert.equal(U.placeOverlay(items, 350, 300, 1000), 350);
-});
 
-test('placeOverlay: crowded header -> moves left of the buttons rather than covering them', () => {
-  // centred (354..) would cover the button at 681; nearest button-free spot is just left of it
-  const items = [{ l: 276, r: 500, ctl: false }, { l: 681, r: 760, ctl: true }];
-  assert.equal(U.placeOverlay(items, 354, 338, 800), 331);
-});
 
-test('placeOverlay: ignores items far to the left or right of the strip', () => {
-  const items = [{ l: 20, r: 200, ctl: true }, { l: 800, r: 980, ctl: true }];
-  assert.equal(U.placeOverlay(items, 350, 300, 1000), 350);
-});
 
 test('heatLevel thresholds', () => {
   const cases = [[0, 0], [79.9, 0], [80, 1], [89.9, 1], [90, 2], [94.9, 2], [95, 3], [99.4, 3], [99.5, 4], [100, 4], [130, 4], [NaN, 0]];
@@ -333,13 +287,17 @@ test('formatResetAt: time only when soon, weekday when further out', () => {
   assert.equal(later, 'Fri 9 AM');
 });
 
-test('placeOverlay: no fully clear spot -> slide right up to the buttons to cover less title', () => {
-  // title 413..821, gap before "Step" button only 276px for a 338px strip
-  const items = [
-    { l: 225, r: 390, ctl: false },
-    { l: 413, r: 821, ctl: false },
-    { l: 1121, r: 1205, ctl: true },
-    { l: 1221, r: 1273, ctl: true },
-  ];
-  assert.equal(U.placeOverlay(items, 579, 338, 1288), 1121 - 12 - 338);
+
+test('placeBetween: centred when the title is short', () => {
+  assert.equal(U.placeBetween(579, 338, 450, 1121), 579);
+});
+
+test('placeBetween: slides right past a long title (incl. its chevron)', () => {
+  assert.equal(U.placeBetween(579, 338, 700, 1121), 712);
+});
+
+test('placeBetween: never runs into the buttons or a side panel', () => {
+  assert.equal(U.placeBetween(800, 338, 450, 1121), 1121 - 12 - 338);
+  // gap too narrow: stay off the buttons, title end goes under
+  assert.equal(U.placeBetween(579, 338, 833, 1121), 771);
 });
