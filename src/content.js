@@ -1070,6 +1070,24 @@
   const BTN_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"]';
   const controlOf = (el) => el.closest(BTN_SELECTOR) || el.closest('img, svg');
   const isButton = (el, r) => r.width < 160 && (el.textContent || '').trim().length <= 16;
+  // The conversation scrolls underneath claude.ai's see-through header, so anything that
+  // scrolls is page content, not header. Keeps the strip's position independent of scrolling.
+  function scrolls(el) {
+    const docScrolls = document.scrollingElement && document.scrollingElement.scrollHeight > window.innerHeight + 1;
+    let pinned = false;
+    for (let e = el, i = 0; e && i < 30; e = e.parentElement, i++) {
+      if (e === document.body || e === document.documentElement) break;
+      const cs = getComputedStyle(e);
+      if (cs.position === 'fixed' || cs.position === 'sticky') pinned = true;
+      if (/(auto|scroll|overlay)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 1) return !pinned;
+    }
+    return docScrolls && !pinned;
+  }
+  function headerRoots(h) {
+    const roots = bandEls.filter((e) => e.isConnected && !scrolls(e) && e.getBoundingClientRect().bottom <= h + 6);
+    return roots.filter((e) => !roots.some((o) => o !== e && o.contains(e)));
+  }
+
   function measureHeaderItems(h) {
     const out = [];
     const vw = window.innerWidth;
@@ -1077,8 +1095,7 @@
     const visible = (el) => !el.checkVisibility || el.checkVisibility({ checkVisibilityCSS: true });
     let budget = 3000; // cap the work on very large headers
     const range = document.createRange();
-    const roots = bandEls.filter((e) => e.isConnected && !bandEls.some((o) => o !== e && o.contains(e)));
-    for (const bandEl of roots) {
+    for (const bandEl of headerRoots(h)) {
       const walker = document.createTreeWalker(bandEl, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n && budget > 0; n = walker.nextNode(), budget--) {
         if (n.nodeType === 3) {
@@ -1119,7 +1136,7 @@
     const y = Math.max(4, Math.round((h - 1) / 2));
     // claude.ai's header is see-through: the conversation scrolls underneath it. Only count
     // what belongs to the header bar itself (elements that end within the header band).
-    const roots = bandEls.filter((e) => e.isConnected && e.getBoundingClientRect().bottom <= h + 6);
+    const roots = headerRoots(h);
     if (!roots.length) return [];
     const inHeader = (el) => roots.some((r) => r.contains(el));
     const runs = [];
@@ -1167,19 +1184,12 @@
   // only spans the chat column, so the strip should stay inside it.
   function headerBounds(axis, h) {
     const vw = window.innerWidth;
-    const prev = host.style.pointerEvents;
-    host.style.pointerEvents = 'none';
     let best = null;
-    try {
-      let el = document.elementFromPoint(Math.min(Math.max(axis, 1), vw - 1), Math.max(4, Math.round(h / 2)));
-      for (let i = 0; i < 12 && el && el !== document.body && el !== document.documentElement; i++, el = el.parentElement) {
-        const r = el.getBoundingClientRect();
-        if (r.top <= 4 && r.bottom <= h + 6 && r.height >= h * 0.6 && (!best || r.width > best.width)) best = r;
-      }
-    } finally {
-      host.style.pointerEvents = prev;
+    for (const e of headerRoots(h)) {
+      const r = e.getBoundingClientRect();
+      if (r.top <= 4 && r.left <= axis && r.right >= axis && r.width >= 300 && (!best || r.width < best.width)) best = r; // the chat column's own header, not a full-width wrapper
     }
-    return best && best.width >= 300 ? { l: Math.max(0, best.left), r: Math.min(vw, best.right) } : { l: 0, r: vw };
+    return best ? { l: Math.max(0, best.left), r: Math.min(vw, best.right) } : { l: 0, r: vw };
   }
 
   function layout() {
