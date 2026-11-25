@@ -1087,7 +1087,15 @@
       const r = el.getBoundingClientRect();
       if (r.left > axis && r.right >= vw - 2 && r.height >= vh * 0.6) panelLeft = Math.min(panelLeft, r.left);
     }
-    return { l: 0, r: panelLeft };
+    // The sidebar on the left: a tall block from the window's left edge that ends before the
+    // composer. Its own top buttons (logo, new chat) are not part of the chat header.
+    let sideRight = 0;
+    el = document.elementFromPoint(12, Math.round(vh * 0.5));
+    for (let i = 0; el && i < 25 && el !== document.body && el !== document.documentElement; el = el.parentElement, i++) {
+      const r = el.getBoundingClientRect();
+      if (r.left <= 2 && r.right < axis && r.height >= vh * 0.6) sideRight = Math.max(sideRight, r.right);
+    }
+    return { l: sideRight, r: panelLeft };
   }
 
   function measureBounds(axis) {
@@ -1105,7 +1113,7 @@
       const label = (el.textContent || '').trim();
       ctrls.push({ l: r.left, r: r.right, btn: !!label && label.length <= 16 && r.width < 160 });
     }
-    const { lastLeft, firstRight } = U.splitHeader(ctrls, col.r);
+    const { lastLeft, firstRight } = U.splitHeader(ctrls, col.r, axis);
     if (lastLeft != null) left = Math.max(left, lastLeft); // title + chevron: stay right of them
     if (firstRight != null) right = Math.min(right, firstRight); // header buttons: stay left of them
     return { left, right };

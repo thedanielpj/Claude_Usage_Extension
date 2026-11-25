@@ -199,9 +199,10 @@
    * the right group (Share etc.) at the widest empty stretch between them. Returns the right
    * edge of the left group and the left edge of the right group (null if a group is missing).
    * Gaps under `minGap` px don't split, so a header with no right-side buttons is all "left".
-   * ctrls: [{l, r, btn}] (btn = a short text button). end = right edge of the header.
+   * ctrls: [{l, r, btn}] (btn = a short text button). end = right edge of the header,
+   * mid = the composer's centre line.
    */
-  function splitHeader(ctrls, end = null, minGap = 48) {
+  function splitHeader(ctrls, end = null, mid = null, minGap = 48) {
     const xs = ctrls.filter((c) => c.r > c.l).sort((a, b) => a.l - b.l);
     if (!xs.length) return { lastLeft: null, firstRight: null };
     let reach = xs[0].r;
@@ -212,6 +213,9 @@
       reach = Math.max(reach, xs[i].r);
     }
     let at = best.gap >= minGap ? best.at : xs.length;
+    // The buttons on the right never start left of the composer's centre: a split there means
+    // the widest gap was inside the title side (e.g. sidebar icons | breadcrumb), so no split.
+    if (mid != null && at < xs.length && xs[at].l < mid) at = xs.length;
     if (at === xs.length && end != null) {
       // No clear gap (long title pressed up against the buttons): the right group is the run of
       // short text buttons ("Step 3 of 5", "Share") at the header's right end.

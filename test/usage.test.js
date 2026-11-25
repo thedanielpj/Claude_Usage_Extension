@@ -326,3 +326,8 @@ test('splitHeader: side panel, title + icon chevron near the panel edge -> all l
   const c = [{ l: 196, r: 330 }, { l: 340, r: 583 }, { l: 583, r: 596 }];
   assert.deepEqual(U.splitHeader(c, 612), { lastLeft: 596, firstRight: null });
 });
+
+test('splitHeader: widest gap is sidebar icons | breadcrumb (panel open) -> not a split', () => {
+  const c = [{ l: 35, r: 60 }, { l: 145, r: 205 }, { l: 265, r: 430 }, { l: 440, r: 530 }, { l: 530, r: 545 }];
+  assert.deepEqual(U.splitHeader(c, 690, 520), { lastLeft: 545, firstRight: null });
+});
