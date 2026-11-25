@@ -1066,6 +1066,9 @@
   const CTL_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"], img, svg';
   // A real button is small with a short label ("Share", "Step 3 of 5"). A long label (the
   // renamable chat title, a breadcrumb link) is text the strip may cover if it must.
+  // An icon inside a button or link (like the chevron next to the chat title) belongs to it.
+  const BTN_SELECTOR = 'button, a[href], input, select, textarea, [role="button"], [contenteditable="true"]';
+  const controlOf = (el) => el.closest(BTN_SELECTOR) || el.closest('img, svg');
   const isButton = (el, r) => r.width < 160 && (el.textContent || '').trim().length <= 16;
   function measureHeaderItems(h) {
     const out = [];
@@ -1097,7 +1100,7 @@
             }
             if (rr > l) out.push({ l, r: rr, ctl: false });
           }
-        } else if (n.matches(CTL_SELECTOR) && !host.contains(n) && visible(n)) {
+        } else if (n.matches(CTL_SELECTOR) && controlOf(n) === n && !host.contains(n) && visible(n)) {
           const r = n.getBoundingClientRect();
           // a control stretched across most of the header is a layout wrapper, not a button
           // a wide control (e.g. the renamable chat title) is text to avoid, not a button to stay off
@@ -1114,6 +1117,11 @@
   const STEP = 4;
   function sampleHeader(h, from, to) {
     const y = Math.max(4, Math.round((h - 1) / 2));
+    // claude.ai's header is see-through: the conversation scrolls underneath it. Only count
+    // what belongs to the header bar itself (elements that end within the header band).
+    const roots = bandEls.filter((e) => e.isConnected && e.getBoundingClientRect().bottom <= h + 6);
+    if (!roots.length) return [];
+    const inHeader = (el) => roots.some((r) => r.contains(el));
     const runs = [];
     let cur = null;
     const prev = host.style.pointerEvents;
@@ -1122,8 +1130,8 @@
       for (let x = Math.max(1, from); x < to; x += STEP) {
         let kind = null;
         const el = document.elementFromPoint(x, y);
-        if (el && el !== document.body && el !== document.documentElement) {
-          const c = el.closest(CTL_SELECTOR);
+        if (el && el !== document.body && el !== document.documentElement && inHeader(el)) {
+          const c = controlOf(el);
           const cr = c && c.getBoundingClientRect();
           // small controls are buttons to stay off; a wide one (like a renamable title) counts as text
           if (cr && isButton(c, cr)) kind = 'ctl';
