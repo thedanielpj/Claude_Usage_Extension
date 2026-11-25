@@ -1,6 +1,11 @@
 /* Flame frames for the burn animation: horizontal, source on the right, tip pointing left.
- * Generated from the supplied 10-frame flame Lottie (see flame/README); coordinates are in a
- * 166.3x76.6 box. Not hand-edited. */
+ * Coordinates are in a 166.3x76.6 box. Generated, not hand-edited.
+ *
+ * Credit and licence: derived (rotated 90 degrees, recoloured, retimed) from a free flame
+ * animation ("VG_Flame_Def") in the LottieFiles community library. It is used, and this
+ * modified version is shared, under the Lottie Simple License:
+ * https://lottiefiles.com/page/license
+ * The rest of this extension's code is not covered by that licence. */
 (function (root) {
   'use strict';
   root.ClaudeFlame = {

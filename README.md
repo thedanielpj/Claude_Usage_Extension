@@ -75,7 +75,7 @@ npm test        # unit tests for parsing, formatting and the +N% logic (Node 20+
 manifest.json      MV3 manifest
 src/usage.js       pure parsing/formatting/delta helpers (unit-tested)
 src/content.js     the strip: UI (shadow DOM), fetching, flip, burn animation, drag
-src/flame.js       flame frames for the burn animation (generated vector paths)
+src/flame.js       flame frames for the burn animation (from a LottieFiles animation, Lottie Simple License)
 popup.html/css/js  toolbar popup (on/off switch + privacy link)
 fonts/             Inter (variable, latin subset) and Bangers (burn word), both SIL Open Font License
 test/              node:test unit tests
@@ -88,4 +88,4 @@ All styling is in the `CSS` string near the top of `src/content.js`. The palette
 
 ## Not affiliated with Anthropic
 
-This is an independent project. Inter is © The Inter Project Authors and Bangers is © The Bangers Project Authors; both are used under the SIL Open Font License 1.1 (see `fonts/LICENSE.txt` and `fonts/Bangers-OFL.txt`).
+This is an independent project. Inter is © The Inter Project Authors and Bangers is © The Bangers Project Authors; both are used under the SIL Open Font License 1.1 (see `fonts/LICENSE.txt` and `fonts/Bangers-OFL.txt`). The burn flame (`src/flame.js`) is a modified version of a free flame animation ("VG_Flame_Def") from the LottieFiles community library, used and shared under the [Lottie Simple License](https://lottiefiles.com/page/license); thanks to its creator.
